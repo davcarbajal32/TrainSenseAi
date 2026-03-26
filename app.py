@@ -16,7 +16,10 @@ def home():
 
 @app.route("/signup", methods=["POST"])
 def signup():
-    users.insert_one(request.json)
+    data = request.json
+    if users.find_one({"email": data["email"]}):
+        return jsonify({"message": "Account already exists"})
+    users.insert_one(data)
     return jsonify({"message": "User created"})
 
 
@@ -38,6 +41,7 @@ def check_yesterday():
     today = datetime.now().strftime("%Y-%m-%d")
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
+    # Always query the database fresh - no caching
     yesterday_entry = daily_inputs.find_one({
         "email": email,
         "date": yesterday
@@ -55,41 +59,37 @@ def check_yesterday():
     })
 
 
-@app.route("/seed")
-def seed():
-    users.insert_one({"email": "test", "password": "test"})
-
-    for i in range(7):
-        sleep_hrs = 5 + i * 0.3
-        sleep_qual = 5 + i
-        steps = 4000 + i * 1000
-        calories = 200 + i * 50
-        very_active = 10 + i * 5
-        fairly_active = 15 + i * 3
-        lightly_active = 30 + i * 2
-
-        # Compute using SAME formulas as training
-        intensity = (very_active * 3 + fairly_active * 2 + lightly_active) / 60
-        fatigue = (calories / 100) + (steps / 2000) + intensity
-
-        daily_inputs.insert_one({
-            "email": "test",
-            "date": f"2026-03-{17 + i:02d}",
-            "input": {
-                "noisy_sleep_hours": sleep_hrs,
-                "sleep_quality": sleep_qual,
-                "TotalSteps": steps,
-                "TotalCalories": calories,
-                "heart_rate": 70,
-                "very_active_min": very_active,
-                "fairly_active_min": fairly_active,
-                "lightly_active_min": lightly_active,
-                "intensity": intensity,
-                "fatigue": fatigue
-            }
-        })
-
-    return "Seeded"
+def estimate_sleep_quality(sleep_hours):
+    """
+    Estimate sleep quality (1-10) from sleep duration.
+    Mirrors the Sleep_health_and_lifestyle_dataset.csv distribution
+    where Sleep Duration and Quality of Sleep are correlated:
+      ~5 hrs -> quality 3-4
+      ~6 hrs -> quality 5-6
+      ~7 hrs -> quality 7
+      ~7.5-8 hrs -> quality 8-9
+      ~8.5+ hrs -> quality 9-10
+    """
+    if sleep_hours <= 4:
+        return 2
+    elif sleep_hours <= 5:
+        return 4
+    elif sleep_hours <= 5.5:
+        return 5
+    elif sleep_hours <= 6:
+        return 6
+    elif sleep_hours <= 6.5:
+        return 6
+    elif sleep_hours <= 7:
+        return 7
+    elif sleep_hours <= 7.5:
+        return 8
+    elif sleep_hours <= 8:
+        return 8
+    elif sleep_hours <= 8.5:
+        return 9
+    else:
+        return 9
 
 
 def compute_intensity(very_active, fairly_active, lightly_active):
@@ -114,6 +114,47 @@ def compute_rolling_fatigue(email, today_fatigue):
     return sum(vals) / len(vals)
 
 
+@app.route("/seed")
+def seed():
+    # Clear old seed data
+    users.delete_many({"email": "test"})
+    daily_inputs.delete_many({"email": "test"})
+    predictions.delete_many({"email": "test"})
+
+    users.insert_one({"email": "test", "password": "test"})
+
+    for i in range(7):
+        sleep_hrs = 5 + i * 0.3
+        sleep_qual = estimate_sleep_quality(sleep_hrs)
+        steps = 4000 + i * 1000
+        calories = 200 + i * 50
+        very_active = 10 + i * 5
+        fairly_active = 15 + i * 3
+        lightly_active = 30 + i * 2
+
+        intensity = compute_intensity(very_active, fairly_active, lightly_active)
+        fatigue = compute_fatigue(calories, steps, intensity)
+
+        daily_inputs.insert_one({
+            "email": "test",
+            "date": f"2026-03-{17 + i:02d}",
+            "input": {
+                "noisy_sleep_hours": sleep_hrs,
+                "sleep_quality": sleep_qual,
+                "TotalSteps": steps,
+                "TotalCalories": calories,
+                "heart_rate": 70,
+                "very_active_min": very_active,
+                "fairly_active_min": fairly_active,
+                "lightly_active_min": lightly_active,
+                "intensity": intensity,
+                "fatigue": fatigue
+            }
+        })
+
+    return "Seeded"
+
+
 @app.route("/auto_predict", methods=["POST"])
 def auto_predict():
     data = request.json
@@ -134,12 +175,14 @@ def auto_predict():
 
     prediction, explanation = output(input_data)
 
-    predictions.insert_one({
-        "email": email,
-        "date": today,
-        "prediction": prediction,
-        "explanation": explanation
-    })
+    # Only store if we don't already have today's prediction
+    if not predictions.find_one({"email": email, "date": today}):
+        predictions.insert_one({
+            "email": email,
+            "date": today,
+            "prediction": prediction,
+            "explanation": explanation
+        })
 
     return jsonify({
         "prediction": prediction,
@@ -156,7 +199,6 @@ def predict():
 
     # Pull raw user inputs
     sleep_hours = float(data.get("noisy_sleep_hours", 0))
-    sleep_quality = float(data.get("sleep_quality", 0))
     steps = float(data.get("TotalSteps", 0))
     calories = float(data.get("TotalCalories", 0))
     heart_rate = float(data.get("heart_rate", 0))
@@ -165,6 +207,7 @@ def predict():
     lightly_active = float(data.get("lightly_active_min", 0))
 
     # Compute derived features server-side (matches training formulas)
+    sleep_quality = estimate_sleep_quality(sleep_hours)
     intensity = compute_intensity(very_active, fairly_active, lightly_active)
     fatigue = compute_fatigue(calories, steps, intensity)
     rolling = compute_rolling_fatigue(email, fatigue)
@@ -183,12 +226,20 @@ def predict():
         "fatigue": fatigue
     }
 
-    # Store as yesterday's data
-    daily_inputs.insert_one({
-        "email": email,
-        "date": yesterday,
-        "input": stored_input
-    })
+    # Check if yesterday's entry already exists - don't duplicate
+    existing = daily_inputs.find_one({"email": email, "date": yesterday})
+    if existing:
+        # Update instead of duplicate
+        daily_inputs.update_one(
+            {"email": email, "date": yesterday},
+            {"$set": {"input": stored_input}}
+        )
+    else:
+        daily_inputs.insert_one({
+            "email": email,
+            "date": yesterday,
+            "input": stored_input
+        })
 
     # Build model input with rolling fatigue
     model_input = stored_input.copy()
@@ -197,13 +248,20 @@ def predict():
 
     prediction, explanation = output(model_input)
 
-    # Store prediction for today
-    predictions.insert_one({
-        "email": email,
-        "date": today,
-        "prediction": prediction,
-        "explanation": explanation
-    })
+    # Check if today's prediction already exists - don't duplicate
+    existing_pred = predictions.find_one({"email": email, "date": today})
+    if existing_pred:
+        predictions.update_one(
+            {"email": email, "date": today},
+            {"$set": {"prediction": prediction, "explanation": explanation}}
+        )
+    else:
+        predictions.insert_one({
+            "email": email,
+            "date": today,
+            "prediction": prediction,
+            "explanation": explanation
+        })
 
     return jsonify({
         "prediction": prediction,
@@ -241,7 +299,6 @@ def visualization():
     user_data = user_data[-7:]
 
     dates = [d["date"] for d in user_data]
-
     sleep = [d["input"]["noisy_sleep_hours"] for d in user_data]
     fatigue = [d["input"]["fatigue"] for d in user_data]
     intensity = [d["input"]["intensity"] for d in user_data]
@@ -253,7 +310,6 @@ def visualization():
     ]
 
     images = []
-
     short_dates = [d[5:] for d in dates]
 
     bg_color = "#1e293b"
