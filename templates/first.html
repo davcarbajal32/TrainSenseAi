@@ -88,10 +88,56 @@ h2, h3 {
     margin-bottom: 10px;
 }
 
-#result {
+.tagline {
+    color: #94a3b8;
+    font-size: 15px;
+    margin-top: 6px;
+    line-height: 1.5;
+}
+
+/* Readiness score display */
+.readiness-badge {
+    display: inline-block;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-size: 18px;
+    font-weight: bold;
+    margin-bottom: 15px;
+}
+
+.readiness-high {
+    background: rgba(52, 211, 153, 0.2);
+    color: #34d399;
+    border: 1px solid #34d399;
+}
+
+.readiness-moderate {
+    background: rgba(251, 191, 36, 0.2);
+    color: #fbbf24;
+    border: 1px solid #fbbf24;
+}
+
+.readiness-low {
+    background: rgba(244, 63, 94, 0.2);
+    color: #f43f5e;
+    border: 1px solid #f43f5e;
+}
+
+#recommendation-title {
     font-size: 22px;
     font-weight: bold;
     margin-top: 15px;
+    margin-bottom: 10px;
+}
+
+#llm-response {
+    background: #334155;
+    padding: 20px;
+    border-radius: 10px;
+    margin-top: 15px;
+    line-height: 1.7;
+    font-size: 15px;
+    white-space: pre-line;
 }
 
 .status-msg {
@@ -102,11 +148,11 @@ h2, h3 {
     text-align: center;
 }
 
-.tagline {
+.loading {
     color: #94a3b8;
-    font-size: 15px;
-    margin-top: 6px;
-    line-height: 1.5;
+    font-style: italic;
+    text-align: center;
+    padding: 20px;
 }
 </style>
 
@@ -173,8 +219,9 @@ h2, h3 {
     <button class="back-btn" onclick="goToDashboard()">← Back to Dashboard</button>
     <div class="card">
         <h3>Today's Recommendation</h3>
-        <div id="result"></div>
-        <ul id="explanation"></ul>
+        <div id="readiness-display"></div>
+        <div id="recommendation-title"></div>
+        <div id="llm-response"></div>
     </div>
 </div>
 
@@ -192,7 +239,9 @@ h2, h3 {
         <input id="sim_fairly_active" placeholder="Fairly Active Minutes" type="number" min="0">
         <input id="sim_lightly_active" placeholder="Lightly Active Minutes" type="number" min="0">
         <button onclick="simulate()">Simulate</button>
-        <p id="simResult"></p>
+        <div id="sim-readiness-display" style="margin-top:15px;"></div>
+        <div id="sim-recommendation-title" style="font-size:20px;font-weight:bold;margin-top:10px;"></div>
+        <div id="sim-llm-response" style="background:#334155;padding:20px;border-radius:10px;margin-top:15px;line-height:1.7;font-size:15px;white-space:pre-line;display:none;"></div>
     </div>
 </div>
 
@@ -244,18 +293,27 @@ function showSimulation() {
     document.getElementById("simulationSection").style.display = "block";
 }
 
-function displayRecommendation(prediction, explanation) {
-    document.getElementById("result").innerText =
-        "Recommendation: " + prediction;
+function getReadinessClass(prediction) {
+    if (prediction.toLowerCase().includes("hard")) return "readiness-high";
+    if (prediction.toLowerCase().includes("rest")) return "readiness-low";
+    return "readiness-moderate";
+}
 
-    const explanationList = document.getElementById("explanation");
-    explanationList.innerHTML = "";
+function displayRecommendation(prediction, explanation, readinessScore, prefix) {
+    const readinessEl = document.getElementById(prefix + "readiness-display");
+    const titleEl = document.getElementById(prefix + "recommendation-title");
+    const responseEl = document.getElementById(prefix + "llm-response");
 
-    explanation.forEach(exp => {
-        const li = document.createElement("li");
-        li.innerText = exp;
-        explanationList.appendChild(li);
-    });
+    // Show readiness score badge
+    const badgeClass = getReadinessClass(prediction);
+    readinessEl.innerHTML = '<span class="readiness-badge ' + badgeClass + '">Predicted Readiness: ' + readinessScore + '</span>';
+
+    // Show recommendation title
+    titleEl.innerText = "Recommendation: " + prediction;
+
+    // Show LLM explanation
+    responseEl.style.display = "block";
+    responseEl.innerText = explanation.join("\n");
 }
 
 async function signup() {
@@ -311,7 +369,9 @@ async function checkYesterdayAndLoad() {
         document.getElementById("recommendSection").style.display = "block";
         displayRecommendation(
             data.today_prediction.prediction,
-            data.today_prediction.explanation
+            data.today_prediction.explanation,
+            data.today_prediction.readiness_score || "N/A",
+            ""
         );
 
     } else if (data.needs_input) {
@@ -330,7 +390,12 @@ async function checkYesterdayAndLoad() {
         if (predData.prediction) {
             hideAll();
             document.getElementById("recommendSection").style.display = "block";
-            displayRecommendation(predData.prediction, predData.explanation);
+            displayRecommendation(
+                predData.prediction,
+                predData.explanation,
+                predData.readiness_score || "N/A",
+                ""
+            );
         } else {
             hideAll();
             document.getElementById("inputSection").style.display = "block";
@@ -339,9 +404,17 @@ async function checkYesterdayAndLoad() {
 }
 
 async function predict() {
+    // Show loading state
+    hideAll();
+    document.getElementById("recommendSection").style.display = "block";
+    document.getElementById("readiness-display").innerHTML = "";
+    document.getElementById("recommendation-title").innerText = "";
+    document.getElementById("llm-response").style.display = "block";
+    document.getElementById("llm-response").innerHTML = '<div class="loading">Analyzing your data and generating recommendation...</div>';
+
     const data = {
         email: currentUser,
-        noisy_sleep_hours: parseFloat(document.getElementById("sleep").value) || 0,
+        sleep_hours: parseFloat(document.getElementById("sleep").value) || 0,
         TotalSteps: parseFloat(document.getElementById("steps").value) || 0,
         TotalCalories: parseFloat(document.getElementById("calories").value) || 0,
         heart_rate: parseFloat(document.getElementById("hr").value) || 0,
@@ -358,9 +431,12 @@ async function predict() {
 
     const result = await res.json();
 
-    hideAll();
-    document.getElementById("recommendSection").style.display = "block";
-    displayRecommendation(result.prediction, result.explanation);
+    displayRecommendation(
+        result.prediction,
+        result.explanation,
+        result.readiness_score || "N/A",
+        ""
+    );
 }
 
 async function loadChart() {
@@ -385,9 +461,15 @@ async function loadChart() {
 }
 
 async function simulate() {
+    // Show loading
+    document.getElementById("sim-llm-response").style.display = "block";
+    document.getElementById("sim-llm-response").innerHTML = '<div class="loading">Simulating...</div>';
+    document.getElementById("sim-readiness-display").innerHTML = "";
+    document.getElementById("sim-recommendation-title").innerText = "";
+
     const data = {
         email: currentUser,
-        noisy_sleep_hours: parseFloat(document.getElementById("sim_sleep").value) || 0,
+        sleep_hours: parseFloat(document.getElementById("sim_sleep").value) || 0,
         TotalSteps: parseFloat(document.getElementById("sim_steps").value) || 0,
         TotalCalories: parseFloat(document.getElementById("sim_calories").value) || 300,
         heart_rate: parseFloat(document.getElementById("sim_hr").value) || 70,
@@ -403,8 +485,13 @@ async function simulate() {
     });
 
     const result = await res.json();
-    document.getElementById("simResult").innerText =
-        "Prediction: " + result.prediction;
+
+    displayRecommendation(
+        result.prediction,
+        result.explanation,
+        result.readiness_score || "N/A",
+        "sim-"
+    );
 }
 
 </script>

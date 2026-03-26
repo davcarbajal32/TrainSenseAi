@@ -41,7 +41,6 @@ def check_yesterday():
     today = datetime.now().strftime("%Y-%m-%d")
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Always query the database fresh - no caching
     yesterday_entry = daily_inputs.find_one({
         "email": email,
         "date": yesterday
@@ -59,16 +58,14 @@ def check_yesterday():
     })
 
 
+# ============================================================
+# FEATURE COMPUTATION (matches training script exactly)
+# ============================================================
+
 def estimate_sleep_quality(sleep_hours):
     """
     Estimate sleep quality (1-10) from sleep duration.
-    Mirrors the Sleep_health_and_lifestyle_dataset.csv distribution
-    where Sleep Duration and Quality of Sleep are correlated:
-      ~5 hrs -> quality 3-4
-      ~6 hrs -> quality 5-6
-      ~7 hrs -> quality 7
-      ~7.5-8 hrs -> quality 8-9
-      ~8.5+ hrs -> quality 9-10
+    Mirrors the Sleep_health_and_lifestyle_dataset.csv distribution.
     """
     if sleep_hours <= 4:
         return 2
@@ -93,30 +90,70 @@ def estimate_sleep_quality(sleep_hours):
 
 
 def compute_intensity(very_active, fairly_active, lightly_active):
-    """Same formula as training script."""
+    """Same formula as training: (very*3 + fairly*2 + lightly) / 60"""
     return (very_active * 3 + fairly_active * 2 + lightly_active) / 60
 
 
 def compute_fatigue(calories, steps, intensity):
-    """Same formula as training script."""
+    """Same formula as training: calories/100 + steps/2000 + intensity"""
     return (calories / 100) + (steps / 2000) + intensity
 
 
-def compute_rolling_fatigue(email, today_fatigue):
-    """Average fatigue over last 3 entries including today."""
-    past = list(daily_inputs.find(
+def get_rolling_features(email, current_input):
+    """
+    Compute all rolling features from the user's history.
+    Matches the training script's rolling windows.
+    """
+    past_entries = list(daily_inputs.find(
         {"email": email}
-    ).sort("date", -1).limit(2))
+    ).sort("date", -1).limit(7))
 
-    vals = [d["input"]["fatigue"] for d in past]
-    vals.append(today_fatigue)
+    # Extract historical values
+    fatigue_vals = [d["input"]["fatigue"] for d in past_entries]
+    intensity_vals = [d["input"]["intensity"] for d in past_entries]
+    sleep_vals = [d["input"]["sleep_hours"] for d in past_entries]
 
-    return sum(vals) / len(vals)
+    # Add current day's values at the front
+    current_fatigue = current_input["fatigue"]
+    current_intensity = current_input["intensity"]
+    current_sleep = current_input["sleep_hours"]
 
+    fatigue_vals.insert(0, current_fatigue)
+    intensity_vals.insert(0, current_intensity)
+    sleep_vals.insert(0, current_sleep)
+
+    # 3-day rolling averages
+    rolling_fatigue_3d = sum(fatigue_vals[:3]) / min(len(fatigue_vals), 3)
+    rolling_intensity_3d = sum(intensity_vals[:3]) / min(len(intensity_vals), 3)
+    rolling_sleep_3d = sum(sleep_vals[:3]) / min(len(sleep_vals), 3)
+
+    # 7-day rolling averages
+    rolling_fatigue_7d = sum(fatigue_vals[:7]) / min(len(fatigue_vals), 7)
+    rolling_sleep_7d = sum(sleep_vals[:7]) / min(len(sleep_vals), 7)
+
+    # Recovery debt: 7-day sleep avg minus ideal (7.5 hrs)
+    recovery_debt = rolling_sleep_7d - 7.5
+
+    # Fatigue trend: 3-day vs 7-day (positive = fatigue rising)
+    fatigue_trend = rolling_fatigue_3d - rolling_fatigue_7d
+
+    return {
+        "rolling_fatigue_3d": rolling_fatigue_3d,
+        "rolling_intensity_3d": rolling_intensity_3d,
+        "rolling_sleep_3d": rolling_sleep_3d,
+        "rolling_fatigue_7d": rolling_fatigue_7d,
+        "rolling_sleep_7d": rolling_sleep_7d,
+        "recovery_debt": recovery_debt,
+        "fatigue_trend": fatigue_trend
+    }
+
+
+# ============================================================
+# SEED DATA
+# ============================================================
 
 @app.route("/seed")
 def seed():
-    # Clear old seed data
     users.delete_many({"email": "test"})
     daily_inputs.delete_many({"email": "test"})
     predictions.delete_many({"email": "test"})
@@ -139,7 +176,7 @@ def seed():
             "email": "test",
             "date": f"2026-03-{17 + i:02d}",
             "input": {
-                "noisy_sleep_hours": sleep_hrs,
+                "sleep_hours": sleep_hrs,
                 "sleep_quality": sleep_qual,
                 "TotalSteps": steps,
                 "TotalCalories": calories,
@@ -155,6 +192,21 @@ def seed():
     return "Seeded"
 
 
+# ============================================================
+# CLEAR USER DATA (for testing)
+# ============================================================
+
+@app.route("/clear/<email>")
+def clear_user_data(email):
+    daily_inputs.delete_many({"email": email})
+    predictions.delete_many({"email": email})
+    return f"Cleared all data for {email}"
+
+
+# ============================================================
+# PREDICTION ROUTES
+# ============================================================
+
 @app.route("/auto_predict", methods=["POST"])
 def auto_predict():
     data = request.json
@@ -168,25 +220,26 @@ def auto_predict():
         return jsonify({"error": "No data for yesterday"})
 
     input_data = yesterday_entry["input"].copy()
-    input_data["email"] = email
 
-    rolling = compute_rolling_fatigue(email, input_data.get("fatigue", 0))
-    input_data["rolling_fatigue"] = rolling
+    # Compute rolling features from history
+    rolling = get_rolling_features(email, input_data)
+    input_data.update(rolling)
 
-    prediction, explanation = output(input_data)
+    prediction, explanation, readiness_score = output(input_data)
 
-    # Only store if we don't already have today's prediction
     if not predictions.find_one({"email": email, "date": today}):
         predictions.insert_one({
             "email": email,
             "date": today,
             "prediction": prediction,
-            "explanation": explanation
+            "explanation": explanation,
+            "readiness_score": readiness_score
         })
 
     return jsonify({
         "prediction": prediction,
-        "explanation": explanation
+        "explanation": explanation,
+        "readiness_score": readiness_score
     })
 
 
@@ -198,7 +251,7 @@ def predict():
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
     # Pull raw user inputs
-    sleep_hours = float(data.get("noisy_sleep_hours", 0))
+    sleep_hours = float(data.get("sleep_hours", 0))
     steps = float(data.get("TotalSteps", 0))
     calories = float(data.get("TotalCalories", 0))
     heart_rate = float(data.get("heart_rate", 0))
@@ -206,15 +259,14 @@ def predict():
     fairly_active = float(data.get("fairly_active_min", 0))
     lightly_active = float(data.get("lightly_active_min", 0))
 
-    # Compute derived features server-side (matches training formulas)
+    # Compute derived features (matches training formulas)
     sleep_quality = estimate_sleep_quality(sleep_hours)
     intensity = compute_intensity(very_active, fairly_active, lightly_active)
     fatigue = compute_fatigue(calories, steps, intensity)
-    rolling = compute_rolling_fatigue(email, fatigue)
 
-    # Build the stored input
+    # Build stored input
     stored_input = {
-        "noisy_sleep_hours": sleep_hours,
+        "sleep_hours": sleep_hours,
         "sleep_quality": sleep_quality,
         "TotalSteps": steps,
         "TotalCalories": calories,
@@ -226,10 +278,9 @@ def predict():
         "fatigue": fatigue
     }
 
-    # Check if yesterday's entry already exists - don't duplicate
+    # Store or update yesterday's entry
     existing = daily_inputs.find_one({"email": email, "date": yesterday})
     if existing:
-        # Update instead of duplicate
         daily_inputs.update_one(
             {"email": email, "date": yesterday},
             {"$set": {"input": stored_input}}
@@ -241,31 +292,37 @@ def predict():
             "input": stored_input
         })
 
-    # Build model input with rolling fatigue
+    # Compute rolling features from full history
+    rolling = get_rolling_features(email, stored_input)
+
+    # Build model input with all features
     model_input = stored_input.copy()
-    model_input["email"] = email
-    model_input["rolling_fatigue"] = rolling
+    model_input.update(rolling)
 
-    prediction, explanation = output(model_input)
+    prediction, explanation, readiness_score = output(model_input)
 
-    # Check if today's prediction already exists - don't duplicate
+    # Store or update today's prediction
+    pred_data = {
+        "prediction": prediction,
+        "explanation": explanation,
+        "readiness_score": readiness_score
+    }
+
     existing_pred = predictions.find_one({"email": email, "date": today})
     if existing_pred:
         predictions.update_one(
             {"email": email, "date": today},
-            {"$set": {"prediction": prediction, "explanation": explanation}}
+            {"$set": pred_data}
         )
     else:
-        predictions.insert_one({
-            "email": email,
-            "date": today,
-            "prediction": prediction,
-            "explanation": explanation
-        })
+        pred_entry = {"email": email, "date": today}
+        pred_entry.update(pred_data)
+        predictions.insert_one(pred_entry)
 
     return jsonify({
         "prediction": prediction,
-        "explanation": explanation
+        "explanation": explanation,
+        "readiness_score": readiness_score
     })
 
 
@@ -285,6 +342,10 @@ def history():
     return jsonify({})
 
 
+# ============================================================
+# VISUALIZATION
+# ============================================================
+
 @app.route("/visualization", methods=["POST"])
 def visualization():
     data = request.json
@@ -299,15 +360,23 @@ def visualization():
     user_data = user_data[-7:]
 
     dates = [d["date"] for d in user_data]
-    sleep = [d["input"]["noisy_sleep_hours"] for d in user_data]
+    sleep = [d["input"]["sleep_hours"] for d in user_data]
     fatigue = [d["input"]["fatigue"] for d in user_data]
     intensity = [d["input"]["intensity"] for d in user_data]
 
     readiness = [
-        d["input"]["noisy_sleep_hours"] * d["input"]["sleep_quality"]
+        d["input"]["sleep_hours"] * d["input"]["sleep_quality"]
         - d["input"]["fatigue"]
         for d in user_data
     ]
+
+    # Get readiness scores from predictions if available
+    pred_data = list(predictions.find(
+        {"email": data["email"]}
+    ).sort("date", 1))
+
+    pred_dates = [d["date"] for d in pred_data if "readiness_score" in d]
+    pred_scores = [d["readiness_score"] for d in pred_data if "readiness_score" in d]
 
     images = []
     short_dates = [d[5:] for d in dates]
@@ -318,6 +387,7 @@ def visualization():
     accent1 = "#818cf8"
     accent2 = "#f97316"
     accent3 = "#34d399"
+    accent4 = "#f43f5e"
 
     def style_ax(ax, fig):
         fig.patch.set_facecolor(bg_color)
@@ -364,6 +434,22 @@ def visualization():
     ax.bar(short_dates, intensity, color=accent3, width=0.5, alpha=0.85)
     ax.set_title("Training Intensity")
     ax.set_ylabel("Intensity")
+    style_ax(ax, fig)
+    save_chart(fig)
+
+    # GRAPH 4: RECOVERY DEBT (new!)
+    cumulative_debt = []
+    running_debt = 0
+    for s in sleep:
+        running_debt += (s - 7.5)  # 7.5 is ideal
+        cumulative_debt.append(running_debt)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    colors = [accent3 if d >= 0 else accent4 for d in cumulative_debt]
+    ax.bar(short_dates, cumulative_debt, color=colors, width=0.5, alpha=0.85)
+    ax.axhline(y=0, color=text_color, linewidth=0.8, linestyle="--", alpha=0.5)
+    ax.set_title("Recovery Debt (Cumulative Sleep Balance)")
+    ax.set_ylabel("Hours (+ surplus / - debt)")
     style_ax(ax, fig)
     save_chart(fig)
 

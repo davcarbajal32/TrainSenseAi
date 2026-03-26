@@ -1,99 +1,193 @@
 import pickle
 import pandas as pd
+import requests
+import json
+
+# ============================================================
+# LOAD MODEL AND METADATA
+# ============================================================
 
 with open("model.pkl", "rb") as f:
     model = pickle.load(f)
 
-with open("feature_importance.pkl", "rb") as f:
-    feature_importance = pickle.load(f)
+with open("feature_columns.pkl", "rb") as f:
+    feature_columns = pickle.load(f)
+
+with open("readiness_stats.pkl", "rb") as f:
+    readiness_stats = pickle.load(f)
+
+# ============================================================
+# YOUR API KEY - replace with your actual key
+# ============================================================
+ANTHROPIC_API_KEY = "YOUR_API_KEY_HERE"
 
 
-def generate_explanation(input_data, feature_importance, prediction):
-    explanations = []
+def predict_readiness(input_data):
+    """
+    Use the trained ML model to predict tomorrow's readiness score.
+    Returns the predicted score and a context dict with all the numbers.
+    """
+    model_input = {}
+    for col in feature_columns:
+        model_input[col] = input_data.get(col, 0)
 
-    sorted_features = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
+    df = pd.DataFrame([model_input])
+    predicted_readiness = float(model.predict(df)[0])
 
-    for feature, _ in sorted_features[:3]:
-        value = input_data.get(feature)
-        if value is None:
-            continue
+    # Categorize the score relative to the training distribution
+    if predicted_readiness <= readiness_stats["q25"]:
+        readiness_level = "low"
+    elif predicted_readiness >= readiness_stats["q75"]:
+        readiness_level = "high"
+    else:
+        readiness_level = "moderate"
 
-        if prediction == "Rest":
-            if feature == "rolling_fatigue" and value > 45:
-                explanations.append(f"High recent fatigue ({value:.1f}) suggests recovery is needed")
-            elif feature == "noisy_sleep_hours" and value < 6:
-                explanations.append(f"Low sleep ({value:.1f} hrs) reduced your readiness")
-            elif feature == "sleep_quality" and value < 6:
-                explanations.append(f"Poor sleep quality (estimated {value}/10) impacted recovery")
-            elif feature == "fatigue" and value > 40:
-                explanations.append(f"High workload ({value:.1f}) increased overall fatigue")
-            elif feature == "intensity" and value > 5:
-                explanations.append(f"High training intensity ({value:.1f}) requires more recovery")
+    context = {
+        "predicted_readiness": round(predicted_readiness, 2),
+        "readiness_level": readiness_level,
+        "readiness_range": {
+            "min": readiness_stats["min"],
+            "max": readiness_stats["max"],
+            "avg": round(readiness_stats["mean"], 2)
+        },
+        "sleep_hours": input_data.get("sleep_hours", 0),
+        "sleep_quality": input_data.get("sleep_quality", 0),
+        "fatigue": input_data.get("fatigue", 0),
+        "rolling_fatigue_3d": input_data.get("rolling_fatigue_3d", 0),
+        "rolling_fatigue_7d": input_data.get("rolling_fatigue_7d", 0),
+        "intensity": input_data.get("intensity", 0),
+        "recovery_debt": input_data.get("recovery_debt", 0),
+        "fatigue_trend": input_data.get("fatigue_trend", 0),
+        "heart_rate": input_data.get("heart_rate", 0),
+        "TotalSteps": input_data.get("TotalSteps", 0),
+        "TotalCalories": input_data.get("TotalCalories", 0)
+    }
 
-        elif prediction == "Train Hard":
-            if feature == "rolling_fatigue" and value < 30:
-                explanations.append(f"Low recent fatigue ({value:.1f}) supports harder training")
-            elif feature == "noisy_sleep_hours" and value >= 7:
-                explanations.append(f"Good sleep ({value:.1f} hrs) supports performance")
-            elif feature == "sleep_quality" and value >= 7:
-                explanations.append(f"High sleep quality (estimated {value}/10) enhances readiness")
-            elif feature == "fatigue" and value < 25:
-                explanations.append(f"Low workload ({value:.1f}) means you're fresh for training")
-            elif feature == "intensity" and value < 3:
-                explanations.append(f"Low recent intensity ({value:.1f}) leaves room to push harder")
+    return predicted_readiness, context
 
-        elif prediction == "Light":
-            if feature == "rolling_fatigue" and value >= 30 and value <= 45:
-                explanations.append(f"Moderate recent fatigue ({value:.1f}) suggests balanced effort")
-            elif feature == "noisy_sleep_hours" and value >= 6 and value < 7:
-                explanations.append(f"Decent sleep ({value:.1f} hrs) supports moderate training")
-            elif feature == "sleep_quality" and value >= 5 and value < 7:
-                explanations.append(f"Average sleep quality (estimated {value}/10) supports light work")
-            elif feature == "fatigue" and value >= 25 and value <= 40:
-                explanations.append(f"Moderate workload ({value:.1f}) suggests keeping it light today")
-            elif feature == "intensity" and value >= 3 and value <= 5:
-                explanations.append(f"Moderate recent intensity ({value:.1f}) suggests an easier session")
 
-    if not explanations:
-        if prediction == "Rest":
-            explanations.append("Your combined fatigue and recovery indicators suggest taking a rest day")
-        elif prediction == "Train Hard":
-            explanations.append("Your recovery and fatigue levels indicate you're ready to push it today")
-        elif prediction == "Light":
-            explanations.append("Your recovery and fatigue are balanced — a moderate session is ideal today")
+def get_llm_recommendation(context):
+    """
+    Send the ML model's numerical output to Claude for a natural language
+    workout recommendation with reasoning.
+    """
+    prompt = f"""You are a sports science advisor inside a fitness app called FitLedger.
 
-    return explanations
+A user's data has been analyzed by our ML model. Based on the numbers below, give them a clear workout recommendation for today.
+
+## User's Data (from ML model):
+- Predicted Readiness Score: {context['predicted_readiness']} (scale: {context['readiness_range']['min']:.0f} to {context['readiness_range']['max']:.0f}, average is {context['readiness_range']['avg']})
+- Readiness Level: {context['readiness_level']}
+- Sleep: {context['sleep_hours']} hours (estimated quality: {context['sleep_quality']}/10)
+- Current Fatigue: {context['fatigue']:.1f}
+- 3-Day Average Fatigue: {context['rolling_fatigue_3d']:.1f}
+- 7-Day Average Fatigue: {context['rolling_fatigue_7d']:.1f}
+- Fatigue Trend: {context['fatigue_trend']:.1f} (positive = fatigue rising, negative = fatigue dropping)
+- Recovery Debt: {context['recovery_debt']:.1f} (negative = behind on sleep)
+- Yesterday's Intensity: {context['intensity']:.1f}
+- Resting Heart Rate: {context['heart_rate']} bpm
+- Steps: {context['TotalSteps']:.0f}
+- Calories Burned: {context['TotalCalories']:.0f}
+
+## Instructions:
+1. Start with a clear recommendation: "Train Hard", "Light Training", or "Rest Day"
+2. Give 2-3 short bullet points explaining WHY based on the numbers
+3. Suggest a specific workout type that fits (e.g., "heavy compound lifts", "30-min easy jog", "yoga and stretching")
+4. If recommending rest or light, mention when they might be ready to push harder
+
+Keep it conversational and motivating. No more than 150 words total. Do not use markdown headers."""
+
+    try:
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01"
+            },
+            json={
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 300,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ]
+            },
+            timeout=15
+        )
+
+        data = response.json()
+
+        if "content" in data and len(data["content"]) > 0:
+            return data["content"][0]["text"]
+        else:
+            return None
+
+    except Exception as e:
+        print(f"LLM API error: {e}")
+        return None
+
+
+def fallback_recommendation(context):
+    """
+    If the LLM API fails, generate a basic recommendation from the numbers.
+    """
+    score = context["predicted_readiness"]
+    level = context["readiness_level"]
+
+    if level == "high":
+        recommendation = "Train Hard"
+        explanation = [
+            f"Predicted readiness is strong at {score} (above average)",
+            f"Sleep of {context['sleep_hours']} hrs is supporting recovery",
+            "Your body is primed for a challenging session — heavy lifts or high-intensity intervals"
+        ]
+    elif level == "low":
+        recommendation = "Rest Day"
+        explanation = [
+            f"Predicted readiness is low at {score} (below average)",
+            f"3-day fatigue trend at {context['rolling_fatigue_3d']:.1f} indicates accumulated stress",
+            "Focus on recovery — light stretching, hydration, and quality sleep tonight"
+        ]
+    else:
+        recommendation = "Light Training"
+        explanation = [
+            f"Predicted readiness is moderate at {score}",
+            f"Fatigue is manageable but recovery debt is {context['recovery_debt']:.1f}",
+            "A moderate session works — easy cardio, mobility work, or light technique practice"
+        ]
+
+    return recommendation, explanation
 
 
 def output(input_data):
-    model_input = input_data.copy()
-    model_input.pop("email", None)
+    """
+    Main entry point called by app.py.
+    1. ML model predicts readiness score
+    2. LLM generates natural language recommendation
+    3. Falls back to rule-based if LLM fails
+    """
+    predicted_readiness, context = predict_readiness(input_data)
 
-    # Remove fields the model doesn't use
-    model_input.pop("very_active_min", None)
-    model_input.pop("fairly_active_min", None)
-    model_input.pop("lightly_active_min", None)
+    # Try LLM first
+    llm_response = get_llm_recommendation(context)
 
-    expected_features = [
-        "noisy_sleep_hours",
-        "sleep_quality",
-        "TotalSteps",
-        "TotalCalories",
-        "heart_rate",
-        "intensity",
-        "fatigue",
-        "rolling_fatigue"
-    ]
+    if llm_response:
+        # Parse the recommendation category from the LLM response
+        response_lower = llm_response.lower()
+        if "train hard" in response_lower:
+            recommendation = "Train Hard"
+        elif "rest" in response_lower:
+            recommendation = "Rest Day"
+        else:
+            recommendation = "Light Training"
 
-    df = pd.DataFrame([model_input])
+        # Split LLM response into lines for the explanation list
+        lines = [line.strip() for line in llm_response.split("\n") if line.strip()]
+        explanation = lines
 
-    for col in expected_features:
-        if col not in df:
-            df[col] = 0
+        return recommendation, explanation, round(predicted_readiness, 2)
 
-    df = df[expected_features]
-
-    prediction = model.predict(df)[0]
-    explanation = generate_explanation(input_data, feature_importance, prediction)
-
-    return prediction, explanation
+    else:
+        # Fallback if API fails
+        recommendation, explanation = fallback_recommendation(context)
+        return recommendation, explanation, round(predicted_readiness, 2)
