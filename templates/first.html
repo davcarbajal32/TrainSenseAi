@@ -119,8 +119,9 @@ h2, h3 {
         <input id="steps" placeholder="Steps" type="number">
         <input id="calories" placeholder="Calories Burned" type="number">
         <input id="hr" placeholder="Resting Heart Rate" type="number">
-        <input id="intensity" placeholder="Workout Intensity (0-10)" type="number" step="0.1">
-        <input id="fatigue" placeholder="Fatigue Level (0-100)" type="number" min="0" max="100">
+        <input id="very_active" placeholder="Very Active Minutes (e.g. running, HIIT)" type="number" min="0">
+        <input id="fairly_active" placeholder="Fairly Active Minutes (e.g. brisk walking)" type="number" min="0">
+        <input id="lightly_active" placeholder="Lightly Active Minutes (e.g. casual walking)" type="number" min="0">
 
         <button onclick="predict()">Submit & Get Today's Recommendation</button>
     </div>
@@ -147,8 +148,15 @@ h2, h3 {
 <div id="simulationSection" style="display:none;">
     <div class="card">
         <h3>What If Simulation</h3>
-        <input id="sim_sleep" placeholder="Sleep" type="number" step="0.1">
+        <p style="color:#94a3b8;">See how different sleep and activity levels would change your recommendation.</p>
+        <input id="sim_sleep" placeholder="Sleep (hours)" type="number" step="0.1">
+        <input id="sim_quality" placeholder="Sleep Quality (1-10)" type="number" step="1" min="1" max="10">
         <input id="sim_steps" placeholder="Steps" type="number">
+        <input id="sim_calories" placeholder="Calories Burned" type="number">
+        <input id="sim_hr" placeholder="Resting Heart Rate" type="number">
+        <input id="sim_very_active" placeholder="Very Active Minutes" type="number" min="0">
+        <input id="sim_fairly_active" placeholder="Fairly Active Minutes" type="number" min="0">
+        <input id="sim_lightly_active" placeholder="Lightly Active Minutes" type="number" min="0">
         <button onclick="simulate()">Simulate</button>
         <p id="simResult"></p>
     </div>
@@ -235,7 +243,6 @@ async function login() {
         document.getElementById("auth").style.display = "none";
         document.getElementById("menu").style.display = "block";
 
-        // Check if we need yesterday's data or already have a prediction
         await checkYesterdayAndLoad();
     } else {
         document.getElementById("authMsg").innerText = data.message;
@@ -252,7 +259,6 @@ async function checkYesterdayAndLoad() {
     const data = await res.json();
 
     if (data.has_today_prediction && data.today_prediction) {
-        // Already have today's prediction — show it directly
         hideAll();
         document.getElementById("recommendSection").style.display = "block";
         displayRecommendation(
@@ -261,13 +267,10 @@ async function checkYesterdayAndLoad() {
         );
 
     } else if (data.needs_input) {
-        // No yesterday data yet — ask the user to fill it in
         hideAll();
         document.getElementById("inputSection").style.display = "block";
 
     } else {
-        // Yesterday's data exists but no prediction for today yet
-        // Auto-generate prediction from yesterday's data
         const predRes = await fetch("/auto_predict", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
@@ -281,7 +284,6 @@ async function checkYesterdayAndLoad() {
             document.getElementById("recommendSection").style.display = "block";
             displayRecommendation(predData.prediction, predData.explanation);
         } else {
-            // Fallback: ask for input
             hideAll();
             document.getElementById("inputSection").style.display = "block";
         }
@@ -296,8 +298,9 @@ async function predict() {
         TotalSteps: parseFloat(document.getElementById("steps").value) || 0,
         TotalCalories: parseFloat(document.getElementById("calories").value) || 0,
         heart_rate: parseFloat(document.getElementById("hr").value) || 0,
-        intensity: parseFloat(document.getElementById("intensity").value) || 0,
-        fatigue: parseFloat(document.getElementById("fatigue").value) || 0
+        very_active_min: parseFloat(document.getElementById("very_active").value) || 0,
+        fairly_active_min: parseFloat(document.getElementById("fairly_active").value) || 0,
+        lightly_active_min: parseFloat(document.getElementById("lightly_active").value) || 0
     };
 
     const res = await fetch("/predict", {
@@ -337,13 +340,14 @@ async function loadChart() {
 async function simulate() {
     const data = {
         email: currentUser,
-        noisy_sleep_hours: parseFloat(document.getElementById("sim_sleep").value),
-        sleep_quality: 7,
-        TotalSteps: parseFloat(document.getElementById("sim_steps").value),
-        TotalCalories: 300,
-        heart_rate: 70,
-        intensity: 1.5,
-        fatigue: 30
+        noisy_sleep_hours: parseFloat(document.getElementById("sim_sleep").value) || 0,
+        sleep_quality: parseFloat(document.getElementById("sim_quality").value) || 7,
+        TotalSteps: parseFloat(document.getElementById("sim_steps").value) || 0,
+        TotalCalories: parseFloat(document.getElementById("sim_calories").value) || 300,
+        heart_rate: parseFloat(document.getElementById("sim_hr").value) || 70,
+        very_active_min: parseFloat(document.getElementById("sim_very_active").value) || 0,
+        fairly_active_min: parseFloat(document.getElementById("sim_fairly_active").value) || 0,
+        lightly_active_min: parseFloat(document.getElementById("sim_lightly_active").value) || 0
     };
 
     const res = await fetch("/predict", {

@@ -32,25 +32,17 @@ def login():
 
 @app.route("/check_yesterday", methods=["POST"])
 def check_yesterday():
-    """
-    Check if the user already submitted yesterday's data.
-    Returns:
-      - needs_input: True if we still need yesterday's data
-      - has_today_prediction: True if today's prediction already exists
-    """
     data = request.json
     email = data["email"]
 
     today = datetime.now().strftime("%Y-%m-%d")
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Check if yesterday's daily input exists
     yesterday_entry = daily_inputs.find_one({
         "email": email,
         "date": yesterday
     })
 
-    # Check if today's prediction already exists
     today_prediction = predictions.find_one({
         "email": email,
         "date": today
@@ -63,31 +55,55 @@ def check_yesterday():
     })
 
 
-# ✅ SEED DATA (IMPORTANT)
 @app.route("/seed")
 def seed():
     users.insert_one({"email": "test", "password": "test"})
 
     for i in range(7):
+        sleep_hrs = 5 + i * 0.3
+        sleep_qual = 5 + i
+        steps = 4000 + i * 1000
+        calories = 200 + i * 50
+        very_active = 10 + i * 5
+        fairly_active = 15 + i * 3
+        lightly_active = 30 + i * 2
+
+        # Compute using SAME formulas as training
+        intensity = (very_active * 3 + fairly_active * 2 + lightly_active) / 60
+        fatigue = (calories / 100) + (steps / 2000) + intensity
+
         daily_inputs.insert_one({
             "email": "test",
             "date": f"2026-03-{17 + i:02d}",
             "input": {
-                "noisy_sleep_hours": 5 + i * 0.3,
-                "sleep_quality": 5 + i,
-                "TotalSteps": 4000 + i * 1000,
-                "TotalCalories": 200 + i * 50,
+                "noisy_sleep_hours": sleep_hrs,
+                "sleep_quality": sleep_qual,
+                "TotalSteps": steps,
+                "TotalCalories": calories,
                 "heart_rate": 70,
-                "intensity": 1.5,
-                "fatigue": 60 - i * 5
+                "very_active_min": very_active,
+                "fairly_active_min": fairly_active,
+                "lightly_active_min": lightly_active,
+                "intensity": intensity,
+                "fatigue": fatigue
             }
         })
 
     return "Seeded"
 
 
-# ✅ ROLLING FATIGUE
+def compute_intensity(very_active, fairly_active, lightly_active):
+    """Same formula as training script."""
+    return (very_active * 3 + fairly_active * 2 + lightly_active) / 60
+
+
+def compute_fatigue(calories, steps, intensity):
+    """Same formula as training script."""
+    return (calories / 100) + (steps / 2000) + intensity
+
+
 def compute_rolling_fatigue(email, today_fatigue):
+    """Average fatigue over last 3 entries including today."""
     past = list(daily_inputs.find(
         {"email": email}
     ).sort("date", -1).limit(2))
@@ -100,7 +116,6 @@ def compute_rolling_fatigue(email, today_fatigue):
 
 @app.route("/auto_predict", methods=["POST"])
 def auto_predict():
-    """Generate today's prediction using yesterday's stored data."""
     data = request.json
     email = data["email"]
     today = datetime.now().strftime("%Y-%m-%d")
@@ -111,7 +126,7 @@ def auto_predict():
     if not yesterday_entry:
         return jsonify({"error": "No data for yesterday"})
 
-    input_data = yesterday_entry["input"]
+    input_data = yesterday_entry["input"].copy()
     input_data["email"] = email
 
     rolling = compute_rolling_fatigue(email, input_data.get("fatigue", 0))
@@ -139,19 +154,50 @@ def predict():
     today = datetime.now().strftime("%Y-%m-%d")
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    rolling = compute_rolling_fatigue(email, data["fatigue"])
-    data["rolling_fatigue"] = rolling
+    # Pull raw user inputs
+    sleep_hours = float(data.get("noisy_sleep_hours", 0))
+    sleep_quality = float(data.get("sleep_quality", 0))
+    steps = float(data.get("TotalSteps", 0))
+    calories = float(data.get("TotalCalories", 0))
+    heart_rate = float(data.get("heart_rate", 0))
+    very_active = float(data.get("very_active_min", 0))
+    fairly_active = float(data.get("fairly_active_min", 0))
+    lightly_active = float(data.get("lightly_active_min", 0))
 
-    # Store as yesterday's data (since user is entering what happened yesterday)
+    # Compute derived features server-side (matches training formulas)
+    intensity = compute_intensity(very_active, fairly_active, lightly_active)
+    fatigue = compute_fatigue(calories, steps, intensity)
+    rolling = compute_rolling_fatigue(email, fatigue)
+
+    # Build the stored input
+    stored_input = {
+        "noisy_sleep_hours": sleep_hours,
+        "sleep_quality": sleep_quality,
+        "TotalSteps": steps,
+        "TotalCalories": calories,
+        "heart_rate": heart_rate,
+        "very_active_min": very_active,
+        "fairly_active_min": fairly_active,
+        "lightly_active_min": lightly_active,
+        "intensity": intensity,
+        "fatigue": fatigue
+    }
+
+    # Store as yesterday's data
     daily_inputs.insert_one({
         "email": email,
         "date": yesterday,
-        "input": data
+        "input": stored_input
     })
 
-    prediction, explanation = output(data)
+    # Build model input with rolling fatigue
+    model_input = stored_input.copy()
+    model_input["email"] = email
+    model_input["rolling_fatigue"] = rolling
 
-    # Store prediction for today (since yesterday's data informs today's workout)
+    prediction, explanation = output(model_input)
+
+    # Store prediction for today
     predictions.insert_one({
         "email": email,
         "date": today,
@@ -208,16 +254,14 @@ def visualization():
 
     images = []
 
-    # Shorten date labels (e.g. "03-20" instead of "2026-03-20")
     short_dates = [d[5:] for d in dates]
 
-    # Dark theme styling
     bg_color = "#1e293b"
     text_color = "#e2e8f0"
     grid_color = "#334155"
-    accent1 = "#818cf8"  # indigo
-    accent2 = "#f97316"  # orange
-    accent3 = "#34d399"  # green
+    accent1 = "#818cf8"
+    accent2 = "#f97316"
+    accent3 = "#34d399"
 
     def style_ax(ax, fig):
         fig.patch.set_facecolor(bg_color)
@@ -241,7 +285,7 @@ def visualization():
         images.append(base64.b64encode(buf.read()).decode("utf-8"))
         plt.close(fig)
 
-    # -------- GRAPH 1: READINESS --------
+    # GRAPH 1: READINESS
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(short_dates, readiness, marker='o', color=accent1, linewidth=2.5, markersize=8)
     ax.fill_between(short_dates, readiness, alpha=0.15, color=accent1)
@@ -250,7 +294,7 @@ def visualization():
     style_ax(ax, fig)
     save_chart(fig)
 
-    # -------- GRAPH 2: SLEEP vs FATIGUE --------
+    # GRAPH 2: SLEEP vs FATIGUE
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(short_dates, sleep, marker='o', color=accent1, linewidth=2.5, markersize=8, label="Sleep (hrs)")
     ax.plot(short_dates, fatigue, marker='s', color=accent2, linewidth=2.5, markersize=8, label="Fatigue")
@@ -259,7 +303,7 @@ def visualization():
     style_ax(ax, fig)
     save_chart(fig)
 
-    # -------- GRAPH 3: INTENSITY --------
+    # GRAPH 3: INTENSITY
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.bar(short_dates, intensity, color=accent3, width=0.5, alpha=0.85)
     ax.set_title("Training Intensity")
