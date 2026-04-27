@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# Start permissive - just catch real bugs, not style nits.
+select = ["E", "F", "W"]
+ignore = [
+    "E501",  # line-too-long (we set 120 but be lenient)
+    "E402",  # module-level imports not at top - sometimes needed for env loading
+]

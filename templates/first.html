@@ -1,500 +1,1433 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>FitLedger</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cadence AI</title>
 
-<style>
-body {
-    font-family: Arial;
-    background: linear-gradient(135deg, #0f172a, #1e293b);
-    color: white;
-    margin: 0;
-}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Geist:wght@400..600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 
-.container {
-    max-width: 900px;
-    margin: auto;
-    padding: 30px;
-}
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['"Bricolage Grotesque"', 'sans-serif'],
+            sans:    ['Geist', 'sans-serif'],
+            mono:    ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            ink: {
+              0: '#06070a', 50: '#0b0d12', 100: '#11141b', 200: '#191d27',
+              300: '#252a37', 400: '#3b4252', 500: '#6b7280',
+              600: '#9ca3af', 700: '#c8ccd4', 800: '#e6e8ec', 900: '#fafafa',
+            },
+            // Cadence purple - electric violet
+            cadence: {
+              DEFAULT: '#a78bfa', // primary accent
+              dim:     '#8b5cf6',
+              dark:    '#5b21b6',
+              soft:    '#c4b5fd',
+            },
+            warn: '#f59e0b', bad: '#ef4444', good: '#22c55e',
+          },
+        },
+      },
+    };
+  </script>
 
-.card {
-    background: #1e293b;
-    padding: 25px;
-    border-radius: 12px;
-    margin-top: 20px;
-    box-shadow: 0px 10px 30px rgba(0,0,0,0.3);
-}
+  <style>
+    html, body {
+      background: #0b0d12; color: #e6e8ec;
+      font-family: 'Geist', sans-serif;
+      font-feature-settings: 'ss01';
+    }
+    .font-display { font-family: 'Bricolage Grotesque', sans-serif; letter-spacing: -0.02em; }
+    .font-mono    { font-family: 'JetBrains Mono', monospace; }
 
-input {
-    width: 100%;
-    padding: 12px;
-    margin-top: 10px;
-    border-radius: 8px;
-    border: none;
-    background: #334155;
-    color: white;
-    box-sizing: border-box;
-}
+    body::before {
+      content: ''; position: fixed; inset: 0;
+      background:
+        radial-gradient(ellipse 60% 40% at 50% -10%, rgba(167, 139, 250, 0.06), transparent 70%),
+        radial-gradient(ellipse 80% 50% at 100% 100%, rgba(167, 139, 250, 0.03), transparent 70%);
+      pointer-events: none; z-index: 0;
+    }
+    body > * { position: relative; z-index: 1; }
 
-button {
-    margin-top: 15px;
-    padding: 12px;
-    width: 100%;
-    border: none;
-    border-radius: 8px;
-    background: #6366f1;
-    color: white;
-    font-weight: bold;
-    cursor: pointer;
-}
+    input[type="text"], input[type="email"], input[type="password"],
+    input[type="number"], input[type="date"], input[type="time"],
+    select, textarea {
+      background: #0b0d12; border: 1px solid #252a37;
+      color: #e6e8ec; padding: 0.55rem 0.75rem;
+      border-radius: 6px;
+      font-family: 'Geist', sans-serif; font-size: 0.9rem;
+      transition: border-color 120ms, box-shadow 120ms;
+      width: 100%;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none; border-color: #a78bfa;
+      box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.15);
+    }
+    input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: #a78bfa; }
+    textarea { min-height: 5rem; resize: vertical; }
 
-button:hover {
-    background: #4f46e5;
-}
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 0.6rem 1.1rem; border-radius: 6px;
+      font-weight: 600; font-size: 0.875rem;
+      transition: all 120ms; cursor: pointer; border: none;
+      letter-spacing: 0.01em;
+    }
+    .btn-primary { background: #a78bfa; color: #06070a; }
+    .btn-primary:hover { background: #c4b5fd; }
+    .btn-secondary { background: transparent; border: 1px solid #252a37; color: #c8ccd4; }
+    .btn-secondary:hover { border-color: #3b4252; color: #e6e8ec; }
+    .btn-ghost { background: transparent; color: #c8ccd4; }
+    .btn-ghost:hover { color: #a78bfa; }
+    .btn-danger {
+      background: transparent; border: 1px solid #3b4252; color: #9ca3af;
+      padding: 0.3rem 0.55rem; font-size: 0.85rem;
+    }
+    .btn-danger:hover { color: #ef4444; border-color: #ef4444; }
 
-.back-btn {
-    background: none;
-    border: 1px solid #475569;
-    color: #94a3b8;
-    width: auto;
-    padding: 8px 20px;
-    margin-top: 0;
-    margin-bottom: 15px;
-    font-size: 14px;
-}
+    .card { background: #11141b; border: 1px solid #252a37; border-radius: 10px; padding: 1.5rem; }
+    .card-row { background: #11141b; border: 1px solid #252a37; border-radius: 8px; padding: 0.75rem 1rem; }
 
-.back-btn:hover {
-    background: #334155;
-    color: white;
-}
+    .pill {
+      display: inline-flex; align-items: center;
+      padding: 0.2rem 0.6rem; border-radius: 999px;
+      font-size: 0.7rem; font-weight: 600;
+      letter-spacing: 0.05em; text-transform: uppercase;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .pill-ok      { background: rgba(34, 197, 94, 0.12);   color: #4ade80; }
+    .pill-warn    { background: rgba(245, 158, 11, 0.12);  color: #fbbf24; }
+    .pill-bad     { background: rgba(239, 68, 68, 0.12);   color: #f87171; }
+    .pill-cadence { background: rgba(167, 139, 250, 0.12); color: #a78bfa; }
+    .pill-mute    { background: #191d27; color: #9ca3af; }
 
-.logout-btn {
-    background: none;
-    border: 1px solid #475569;
-    color: #94a3b8;
-    width: auto;
-    padding: 8px 20px;
-    margin-top: 10px;
-    font-size: 14px;
-}
+    .nav-link {
+      padding: 0.5rem 0.85rem; border-radius: 6px;
+      font-size: 0.875rem; font-weight: 500;
+      color: #9ca3af; cursor: pointer; transition: all 120ms;
+    }
+    .nav-link:hover { color: #e6e8ec; background: #11141b; }
+    .nav-link.active { color: #a78bfa; background: #191d27; }
 
-.logout-btn:hover {
-    background: #334155;
-    color: white;
-}
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th { text-align: left; padding: 0.5rem 0.75rem; color: #6b7280;
+         font-weight: 500; font-size: 0.7rem; text-transform: uppercase;
+         letter-spacing: 0.08em; border-bottom: 1px solid #252a37; }
+    td { padding: 0.75rem; border-bottom: 1px solid #191d27; }
+    tr:last-child td { border-bottom: none; }
 
-h2, h3 {
-    margin-bottom: 10px;
-}
+    .stat-num { font-family: 'JetBrains Mono', monospace; font-weight: 700; letter-spacing: -0.02em; }
 
-.tagline {
-    color: #94a3b8;
-    font-size: 15px;
-    margin-top: 6px;
-    line-height: 1.5;
-}
+    /* Day-of-week chips */
+    .dow-group { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+    .dow-chip {
+      padding: 0.4rem 0.6rem; border: 1px solid #252a37;
+      border-radius: 6px; cursor: pointer;
+      font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
+      color: #9ca3af; user-select: none; min-width: 3rem; text-align: center;
+      transition: all 100ms;
+    }
+    .dow-chip:hover { border-color: #3b4252; color: #e6e8ec; }
+    .dow-chip.selected {
+      background: #a78bfa; color: #06070a; border-color: #a78bfa; font-weight: 700;
+    }
+    .dow-chip input { display: none; }
 
-/* Readiness score display */
-.readiness-badge {
-    display: inline-block;
-    padding: 8px 20px;
-    border-radius: 20px;
-    font-size: 18px;
-    font-weight: bold;
-    margin-bottom: 15px;
-}
+    /* Weekly calendar cells */
+    .cal-day {
+      background: #11141b;
+      border: 1px solid #252a37;
+      border-radius: 10px;
+      padding: 0.85rem;
+      min-height: 130px;
+      display: flex; flex-direction: column; gap: 0.5rem;
+      transition: border-color 120ms, background 120ms;
+    }
+    .cal-day.today { border-color: #a78bfa; box-shadow: 0 0 0 1px #a78bfa inset; }
+    .cal-day.completed { background: rgba(34, 197, 94, 0.06); border-color: rgba(34, 197, 94, 0.35); }
+    .cal-day.rest      { background: rgba(167, 139, 250, 0.04); }
+    .cal-day .cal-head {
+      display: flex; align-items: center; justify-content: space-between;
+      font-family: 'JetBrains Mono', monospace; font-size: 0.7rem;
+      color: #6b7280; letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .cal-day .cal-num { color: #c8ccd4; font-weight: 700; font-size: 0.9rem; }
+    .cal-check {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1rem; height: 1rem; border-radius: 999px;
+      background: #22c55e; color: #06070a; font-size: 0.65rem; font-weight: 800;
+    }
 
-.readiness-high {
-    background: rgba(52, 211, 153, 0.2);
-    color: #34d399;
-    border: 1px solid #34d399;
-}
+    .page { display: none; }
+    .page.active { display: block; animation: fadeIn 200ms ease-out; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
 
-.readiness-moderate {
-    background: rgba(251, 191, 36, 0.2);
-    color: #fbbf24;
-    border: 1px solid #fbbf24;
-}
+    #toast {
+      position: fixed; bottom: 1.5rem; right: 1.5rem;
+      padding: 0.75rem 1rem; border-radius: 8px;
+      font-size: 0.875rem; font-weight: 500;
+      transform: translateY(120%);
+      transition: transform 240ms ease-out;
+      z-index: 50; max-width: 24rem;
+    }
+    #toast.show { transform: translateY(0); }
+    #toast.ok  { background: #a78bfa; color: #06070a; }
+    #toast.bad { background: #ef4444; color: white; }
 
-.readiness-low {
-    background: rgba(244, 63, 94, 0.2);
-    color: #f43f5e;
-    border: 1px solid #f43f5e;
-}
-
-#recommendation-title {
-    font-size: 22px;
-    font-weight: bold;
-    margin-top: 15px;
-    margin-bottom: 10px;
-}
-
-#llm-response {
-    background: #334155;
-    padding: 20px;
-    border-radius: 10px;
-    margin-top: 15px;
-    line-height: 1.7;
-    font-size: 15px;
-    white-space: pre-line;
-}
-
-.status-msg {
-    background: #334155;
-    padding: 15px;
-    border-radius: 8px;
-    margin-top: 10px;
-    text-align: center;
-}
-
-.loading {
-    color: #94a3b8;
-    font-style: italic;
-    text-align: center;
-    padding: 20px;
-}
-</style>
-
+    /* Cadence logo - rhythm bars */
+    .logomark {
+      display: inline-flex; align-items: end; gap: 2px;
+      width: 1.5rem; height: 1.5rem;
+    }
+    .logomark span {
+      flex: 1; background: #a78bfa; border-radius: 1px;
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+    .logomark span:nth-child(1) { height: 60%; animation-delay: 0s; }
+    .logomark span:nth-child(2) { height: 90%; animation-delay: 0.2s; }
+    .logomark span:nth-child(3) { height: 45%; animation-delay: 0.4s; }
+    .logomark span:nth-child(4) { height: 75%; animation-delay: 0.6s; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scaleY(1); }
+      50%      { opacity: 0.7; transform: scaleY(0.85); }
+    }
+  </style>
 </head>
+<body class="min-h-screen">
 
-<body onload="clearFields()">
-
-<div class="container">
-
-<h2>Welcome to FitLedger</h2>
-<p class="tagline">Your life, the weather, and your body — all in one training plan.<br>Smart workouts that adapt to how you recover, what's on your schedule, and what's outside your door.</p>
-
-<!-- LOGIN -->
-<div id="auth" class="card">
-    <h3>Login or Create Account</h3>
-    <input id="email" placeholder="Email">
-    <input id="password" type="password" placeholder="Password">
-    <button onclick="login()">Login</button>
-    <button onclick="signup()">Create Account</button>
-    <p id="authMsg"></p>
-</div>
-
-<!-- DASHBOARD MENU -->
-<div id="menu" style="display:none;">
-    <div class="card">
-        <h3>Dashboard</h3>
-        <button onclick="showViz()">View Insights</button>
-        <button onclick="showRecommendation()">Workout Recommendation</button>
-        <button onclick="showSimulation()">Plan Ahead</button>
-        <button class="logout-btn" onclick="logout()">Log Out</button>
+  <nav class="border-b border-ink-300 bg-ink-50/80 backdrop-blur sticky top-0 z-30">
+    <div class="max-w-6xl mx-auto px-6 py-3 flex items-center gap-2">
+      <a href="#home" data-route="home" class="flex items-center gap-2.5 mr-4">
+        <div class="logomark"><span></span><span></span><span></span><span></span></div>
+        <span class="font-display text-lg font-semibold tracking-tight">Cadence <span class="text-cadence">AI</span></span>
+      </a>
+      <div id="auth-nav" class="hidden flex-1 items-center gap-1">
+        <a href="#dashboard"   data-route="dashboard"   class="nav-link">Dashboard</a>
+        <a href="#profile"     data-route="profile"     class="nav-link">Profile</a>
+        <a href="#semester"    data-route="semester"    class="nav-link">Semester</a>
+        <a href="#weekly-plan" data-route="weekly-plan" class="nav-link">Week</a>
+        <a href="#workouts"    data-route="workouts"    class="nav-link">Workouts</a>
+        <a id="nav-athletic" href="#athletic" data-route="athletic" class="nav-link hidden">Athletic</a>
+      </div>
+      <div class="flex-1"></div>
+      <span id="nav-user" class="text-xs text-ink-500 font-mono mr-2 hidden md:inline"></span>
+      <button id="nav-logout" onclick="logout()" class="btn btn-secondary hidden">Sign out</button>
     </div>
-</div>
+  </nav>
 
-<!-- YESTERDAY'S DATA INPUT -->
-<div id="inputSection" style="display:none;">
-    <button class="back-btn" onclick="goToDashboard()">← Back to Dashboard</button>
-    <div class="card">
-        <h3>Enter Yesterday's Data</h3>
-        <p style="color:#94a3b8;">We need your info from yesterday to generate today's workout recommendation.</p>
+  <main class="max-w-6xl mx-auto px-6 py-10">
 
-        <input id="sleep" placeholder="Hours of Sleep" type="number" step="0.1">
-        <input id="steps" placeholder="Total Steps" type="number">
-        <input id="calories" placeholder="Calories Burned" type="number">
-        <input id="hr" placeholder="Resting Heart Rate (bpm)" type="number">
-        <input id="very_active" placeholder="Very Active Minutes (running, HIIT, lifting)" type="number" min="0">
-        <input id="fairly_active" placeholder="Fairly Active Minutes (brisk walking, cycling)" type="number" min="0">
-        <input id="lightly_active" placeholder="Lightly Active Minutes (casual walking, stretching)" type="number" min="0">
+    <!-- ========== HOME ========== -->
+    <section id="page-home" class="page">
+      <div class="grid md:grid-cols-2 gap-10 items-center min-h-[60vh]">
+        <div>
+          <p class="font-mono text-xs text-cadence tracking-widest mb-4">// FOR STUDENT-ATHLETES</p>
+          <h1 class="font-display text-5xl md:text-6xl font-semibold leading-[0.95] mb-5">
+            Train smarter,<br>around <span class="text-cadence">your</span> schedule.
+          </h1>
+          <p class="text-ink-700 max-w-md mb-8 text-lg leading-relaxed">
+            Cadence reads your classes, work, study load, and recovery to plan a week of training that fits your life — adjusting whenever something changes.
+          </p>
+          <div class="flex gap-3">
+            <button class="btn btn-primary" onclick="document.getElementById('auth-card').scrollIntoView({behavior:'smooth'})">Get started</button>
+            <a href="#about" class="btn btn-ghost">How it works ↓</a>
+          </div>
+        </div>
 
-        <button onclick="predict()">Submit & Get Today's Recommendation</button>
-    </div>
-</div>
+        <div id="auth-card" class="card">
+          <div class="flex border-b border-ink-300 mb-5">
+            <button id="tab-signup" onclick="switchAuthTab('signup')" class="px-4 py-2 text-sm font-semibold border-b-2 border-cadence text-cadence">
+              Create account
+            </button>
+            <button id="tab-login" onclick="switchAuthTab('login')" class="px-4 py-2 text-sm font-semibold border-b-2 border-transparent text-ink-600 hover:text-ink-800">
+              Sign in
+            </button>
+          </div>
 
-<!-- VISUALIZATION -->
-<div id="vizSection" style="display:none;">
-    <button class="back-btn" onclick="goToDashboard()">← Back to Dashboard</button>
-    <div class="card">
-        <h3>Weekly Insights</h3>
-        <div id="vizImages"></div>
-    </div>
-</div>
+          <div id="form-signup">
+            <label class="text-xs text-ink-600 block mb-1">Username</label>
+            <input id="su-username">
+            <label class="text-xs text-ink-600 block mb-1 mt-3">Email</label>
+            <input id="su-email" type="email">
+            <label class="text-xs text-ink-600 block mb-1 mt-3">Password</label>
+            <input id="su-password" type="password" placeholder="8+ characters">
+            <button onclick="doSignup()" class="btn btn-primary w-full mt-5">Create account</button>
+          </div>
 
-<!-- RECOMMENDATION -->
-<div id="recommendSection" style="display:none;">
-    <button class="back-btn" onclick="goToDashboard()">← Back to Dashboard</button>
-    <div class="card">
-        <h3>Today's Recommendation</h3>
-        <div id="readiness-display"></div>
-        <div id="recommendation-title"></div>
-        <div id="llm-response"></div>
-    </div>
-</div>
+          <div id="form-login" class="hidden">
+            <label class="text-xs text-ink-600 block mb-1">Email</label>
+            <input id="li-email" type="email">
+            <label class="text-xs text-ink-600 block mb-1 mt-3">Password</label>
+            <input id="li-password" type="password">
+            <button onclick="doLogin()" class="btn btn-primary w-full mt-5">Sign in</button>
+          </div>
+        </div>
+      </div>
 
-<!-- SIMULATION -->
-<div id="simulationSection" style="display:none;">
-    <button class="back-btn" onclick="goToDashboard()">← Back to Dashboard</button>
-    <div class="card">
-        <h3>What If Simulation</h3>
-        <p style="color:#94a3b8;">See how different recovery and activity levels would change your recommendation.</p>
-        <input id="sim_sleep" placeholder="Hours of Sleep" type="number" step="0.1">
-        <input id="sim_steps" placeholder="Total Steps" type="number">
-        <input id="sim_calories" placeholder="Calories Burned" type="number">
-        <input id="sim_hr" placeholder="Resting Heart Rate (bpm)" type="number">
-        <input id="sim_very_active" placeholder="Very Active Minutes" type="number" min="0">
-        <input id="sim_fairly_active" placeholder="Fairly Active Minutes" type="number" min="0">
-        <input id="sim_lightly_active" placeholder="Lightly Active Minutes" type="number" min="0">
-        <button onclick="simulate()">Simulate</button>
-        <div id="sim-readiness-display" style="margin-top:15px;"></div>
-        <div id="sim-recommendation-title" style="font-size:20px;font-weight:bold;margin-top:10px;"></div>
-        <div id="sim-llm-response" style="background:#334155;padding:20px;border-radius:10px;margin-top:15px;line-height:1.7;font-size:15px;white-space:pre-line;display:none;"></div>
-    </div>
-</div>
+      <div id="about" class="grid md:grid-cols-3 gap-4 mt-24">
+        <div class="card">
+          <p class="font-mono text-xs text-cadence mb-2">01</p>
+          <h3 class="font-display text-xl font-semibold mb-2">Tell it about you</h3>
+          <p class="text-ink-700 text-sm leading-relaxed">Goals, sport, equipment, energy patterns, classes, work, and study load — every constraint a real coach would want.</p>
+        </div>
+        <div class="card">
+          <p class="font-mono text-xs text-cadence mb-2">02</p>
+          <h3 class="font-display text-xl font-semibold mb-2">Plan your week</h3>
+          <p class="text-ink-700 text-sm leading-relaxed">Sunday: generate a 7-day plan that fits your week. Daily check-ins log sleep + yesterday's workout.</p>
+        </div>
+        <div class="card">
+          <p class="font-mono text-xs text-cadence mb-2">03</p>
+          <h3 class="font-display text-xl font-semibold mb-2">Adjust on the fly</h3>
+          <p class="text-ink-700 text-sm leading-relaxed">Slept 4 hours? Game added Tuesday? The plan revises today's session with reasoning that cites the specific principle applied.</p>
+        </div>
+      </div>
+    </section>
 
-</div>
+    <!-- ========== DASHBOARD ========== -->
+    <section id="page-dashboard" class="page">
+      <div class="flex items-baseline justify-between mb-6">
+        <div>
+          <p class="font-mono text-xs text-ink-600 tracking-widest mb-1" id="dash-date"></p>
+          <h1 class="font-display text-4xl font-semibold">Welcome back, <span id="dash-username" class="text-cadence">—</span></h1>
+        </div>
+      </div>
 
-<script>
+      <!-- 1. Inline daily check-in -->
+      <div id="checkin-card" class="card mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="font-display text-xl font-semibold">Daily check-in</h2>
+            <p class="text-xs text-ink-600 mt-1" id="checkin-subtitle">Quick log: how was last night?</p>
+          </div>
+          <span id="checkin-status-pill" class="pill pill-warn">Pending</span>
+        </div>
 
-let currentUser = "";
+        <div id="checkin-form" class="space-y-4">
+          <div class="grid md:grid-cols-2 gap-4">
+            <div>
+              <label class="text-xs text-ink-600 block mb-1">Hours of sleep last night</label>
+              <div class="flex items-center gap-2">
+                <input type="number" id="dash-sleep" min="0" max="14" step="0.25" placeholder="7.5">
+                <span class="text-xs text-ink-600 font-mono">HRS</span>
+              </div>
+            </div>
+            <div class="flex items-end">
+              <label class="flex items-center gap-3 cursor-pointer pb-2">
+                <input type="checkbox" id="dash-did-workout" onchange="toggleDashWorkoutFields()">
+                <span class="text-sm">I worked out yesterday</span>
+              </label>
+            </div>
+          </div>
 
-function clearFields() {
-    document.getElementById("email").value = "";
-    document.getElementById("password").value = "";
-}
+          <div id="dash-workout-fields" class="hidden grid md:grid-cols-3 gap-4">
+            <div>
+              <label class="text-xs text-ink-600 block mb-1">Type</label>
+              <input type="text" id="dash-workout-type" placeholder="upper push, legs, run…">
+            </div>
+            <div>
+              <label class="text-xs text-ink-600 block mb-1">Duration</label>
+              <div class="flex items-center gap-2">
+                <input type="number" id="dash-duration" min="1" max="600" step="5" placeholder="60">
+                <span class="text-xs text-ink-600 font-mono">MIN</span>
+              </div>
+            </div>
+            <div>
+              <label class="text-xs text-ink-600 block mb-1">Intensity</label>
+              <div class="flex items-center gap-2">
+                <input type="number" id="dash-intensity" min="1" max="10" placeholder="7">
+                <span class="text-xs text-ink-600 font-mono">/ 10</span>
+              </div>
+            </div>
+          </div>
 
-function hideAll() {
-    document.getElementById("inputSection").style.display = "none";
-    document.getElementById("vizSection").style.display = "none";
-    document.getElementById("recommendSection").style.display = "none";
-    document.getElementById("simulationSection").style.display = "none";
-}
+          <div>
+            <label class="text-xs text-ink-600 block mb-1">Notes (optional)</label>
+            <textarea id="dash-notes" placeholder="anything that mattered — felt great, lower back twinge, etc."></textarea>
+          </div>
 
-function goToDashboard() {
-    hideAll();
-    document.getElementById("menu").style.display = "block";
-}
+          <div class="flex gap-3">
+            <button onclick="saveDashCheckIn()" class="btn btn-primary">Save check-in</button>
+          </div>
+        </div>
 
-function logout() {
-    currentUser = "";
-    hideAll();
-    document.getElementById("menu").style.display = "none";
-    document.getElementById("auth").style.display = "block";
-    clearFields();
-    document.getElementById("authMsg").innerText = "";
-}
+        <div id="checkin-completed" class="hidden">
+          <div class="grid md:grid-cols-4 gap-4 mb-3">
+            <div>
+              <p class="text-xs text-ink-600 uppercase tracking-wider mb-1">Sleep</p>
+              <p class="stat-num text-2xl text-cadence" id="ci-sleep">—</p>
+            </div>
+            <div>
+              <p class="text-xs text-ink-600 uppercase tracking-wider mb-1">Workout</p>
+              <p class="font-display text-xl" id="ci-workout">—</p>
+            </div>
+            <div>
+              <p class="text-xs text-ink-600 uppercase tracking-wider mb-1">Duration</p>
+              <p class="stat-num text-2xl" id="ci-duration">—</p>
+            </div>
+            <div>
+              <p class="text-xs text-ink-600 uppercase tracking-wider mb-1">Intensity</p>
+              <p class="stat-num text-2xl" id="ci-intensity">—</p>
+            </div>
+          </div>
+          <button onclick="editDashCheckIn()" class="btn btn-secondary text-xs">Edit yesterday</button>
+        </div>
+      </div>
 
-function showViz() {
-    hideAll();
-    document.getElementById("vizSection").style.display = "block";
-    loadChart();
-}
+      <!-- 2. Weekly calendar -->
+      <div class="card mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="font-display text-xl font-semibold">This week</h2>
+            <p class="text-xs text-ink-600 mt-1" id="cal-range">—</p>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="regenerateToday()" class="btn btn-secondary text-xs">Regenerate today</button>
+            <button onclick="generateWeek()" class="btn btn-secondary text-xs" id="generate-week-btn">Generate week's plan</button>
+          </div>
+        </div>
+        <div id="week-grid" class="grid grid-cols-7 gap-2">
+          <!-- 7 cells injected here -->
+        </div>
+        <div id="cal-empty" class="hidden mt-4 text-center py-8 border border-dashed border-ink-300 rounded-lg">
+          <p class="text-sm text-ink-600 mb-3">No plan generated yet for this week.</p>
+          <p class="text-xs text-ink-500">Once your profile, semester, and week are set up, you'll be able to generate a 7-day plan here. <span class="text-ink-600">(Wired up in session 3.)</span></p>
+        </div>
+      </div>
 
-function showRecommendation() {
-    hideAll();
-    document.getElementById("recommendSection").style.display = "block";
-}
+      <!-- 3. Status tiles -->
+      <div class="grid md:grid-cols-3 gap-4 mb-6">
+        <a href="#profile" data-route="profile" class="card hover:border-ink-400 transition-colors block">
+          <div class="flex items-start justify-between mb-3">
+            <p class="text-xs text-ink-600 uppercase tracking-wider">Profile</p>
+            <span id="dash-profile-pill" class="pill pill-warn">Incomplete</span>
+          </div>
+          <p class="font-display text-2xl mb-1" id="dash-profile-summary">Set up your profile</p>
+          <p class="text-xs text-ink-500" id="dash-profile-detail">Goals, gym budget, energy</p>
+        </a>
 
-function showSimulation() {
-    hideAll();
-    document.getElementById("simulationSection").style.display = "block";
-}
+        <a href="#semester" data-route="semester" class="card hover:border-ink-400 transition-colors block">
+          <div class="flex items-start justify-between mb-3">
+            <p class="text-xs text-ink-600 uppercase tracking-wider">Semester</p>
+            <span id="dash-semester-pill" class="pill pill-warn">None</span>
+          </div>
+          <p class="font-display text-2xl mb-1" id="dash-semester-summary">No semester</p>
+          <p class="text-xs text-ink-500" id="dash-semester-detail">Add your class schedule</p>
+        </a>
 
-function getReadinessClass(prediction) {
-    if (prediction.toLowerCase().includes("hard")) return "readiness-high";
-    if (prediction.toLowerCase().includes("rest")) return "readiness-low";
-    return "readiness-moderate";
-}
+        <a href="#weekly-plan" data-route="weekly-plan" class="card hover:border-ink-400 transition-colors block">
+          <div class="flex items-start justify-between mb-3">
+            <p class="text-xs text-ink-600 uppercase tracking-wider">This Week</p>
+            <span id="dash-week-pill" class="pill pill-warn">Not set</span>
+          </div>
+          <p class="font-display text-2xl mb-1" id="dash-week-summary">No plan yet</p>
+          <p class="text-xs text-ink-500" id="dash-week-detail">Work + study hours per day</p>
+        </a>
+      </div>
 
-function displayRecommendation(prediction, explanation, readinessScore, prefix) {
-    const readinessEl = document.getElementById(prefix + "readiness-display");
-    const titleEl = document.getElementById(prefix + "recommendation-title");
-    const responseEl = document.getElementById(prefix + "llm-response");
+      <!-- Prompt preview (debug) -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="font-display text-xl font-semibold">Prompt preview</h2>
+          <span class="pill pill-mute">Debug</span>
+        </div>
+        <p class="text-xs text-ink-600 mb-4">Exactly what would be sent to Claude. Use this to verify the brain has all your context before session 3 wires up the real API.</p>
+        <div class="flex gap-2 mb-3">
+          <button onclick="loadPreview('daily')" class="btn btn-secondary">Daily prompt</button>
+          <button onclick="loadPreview('weekly')" class="btn btn-secondary">Weekly prompt</button>
+        </div>
+        <pre id="preview-out" class="font-mono text-xs text-ink-700 bg-ink-0 border border-ink-300 rounded-lg p-4 overflow-auto max-h-[500px] whitespace-pre-wrap"></pre>
+      </div>
+    </section>
 
-    // Show readiness score badge
-    const badgeClass = getReadinessClass(prediction);
-    readinessEl.innerHTML = '<span class="readiness-badge ' + badgeClass + '">Predicted Readiness: ' + readinessScore + '</span>';
+    <!-- ========== PROFILE ========== -->
+    <section id="page-profile" class="page">
+      <h1 class="font-display text-4xl font-semibold mb-2">Profile</h1>
+      <p class="text-ink-600 mb-8 max-w-xl">The more accurate this is, the better the recommendations.</p>
 
-    // Show recommendation title
-    titleEl.innerText = "Recommendation: " + prediction;
+      <div class="space-y-6">
+        <div class="card">
+          <h2 class="font-display text-lg font-semibold mb-1">Fitness goals</h2>
+          <p class="text-xs text-ink-600 mb-4">Pick all that apply.</p>
+          <div id="goals-grid" class="grid grid-cols-2 md:grid-cols-3 gap-2"></div>
+        </div>
 
-    // Show LLM explanation
-    responseEl.style.display = "block";
-    responseEl.innerText = explanation.join("\n");
-}
+        <div id="sport-section" class="card hidden">
+          <h2 class="font-display text-lg font-semibold mb-1">Sport details</h2>
+          <p class="text-xs text-ink-600 mb-4">You picked sports training — tell us the sport and context.</p>
+          <div class="grid md:grid-cols-2 gap-4">
+            <div>
+              <label class="text-xs text-ink-600 block mb-1">Sport</label>
+              <select id="sport"></select>
+            </div>
+            <div id="sport-other-wrap" class="hidden">
+              <label class="text-xs text-ink-600 block mb-1">Specify</label>
+              <input type="text" id="sport-other" placeholder="e.g. ultimate frisbee">
+            </div>
+            <div>
+              <label class="text-xs text-ink-600 block mb-1">Team context</label>
+              <select id="team-context">
+                <option value="school">School team</option>
+                <option value="club">Club team</option>
+                <option value="rec_league">Recreational league</option>
+                <option value="personal">Personal / casual</option>
+              </select>
+            </div>
+          </div>
+        </div>
 
-async function signup() {
-    const res = await fetch("/signup", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-            email: document.getElementById("email").value,
-            password: document.getElementById("password").value
-        })
-    });
+        <div class="card">
+          <h2 class="font-display text-lg font-semibold mb-1">Gym budget</h2>
+          <p class="text-xs text-ink-600 mb-4">Monthly spend. Influences what equipment we suggest.</p>
+          <div class="flex items-center gap-3 max-w-xs">
+            <span class="text-ink-600 font-mono">$</span>
+            <input type="number" id="budget" min="0" max="1000" step="5" placeholder="0">
+            <span class="text-xs text-ink-600 font-mono">/MO</span>
+          </div>
+        </div>
 
-    const data = await res.json();
-    document.getElementById("authMsg").innerText = data.message;
-}
+        <div class="card">
+          <h2 class="font-display text-lg font-semibold mb-1">Energy levels</h2>
+          <p class="text-xs text-ink-600 mb-4">When during the day do you feel most energetic? Rate 1–10.</p>
+          <div class="grid grid-cols-3 gap-4 max-w-xl">
+            <div><label class="text-xs text-ink-600 block mb-1">Morning</label><input type="number" id="energy-morning" min="1" max="10" value="5"></div>
+            <div><label class="text-xs text-ink-600 block mb-1">Afternoon</label><input type="number" id="energy-afternoon" min="1" max="10" value="5"></div>
+            <div><label class="text-xs text-ink-600 block mb-1">Evening</label><input type="number" id="energy-evening" min="1" max="10" value="5"></div>
+          </div>
+        </div>
 
-async function login() {
-    const email = document.getElementById("email").value;
+        <div class="card">
+          <h2 class="font-display text-lg font-semibold mb-1">Injuries / limitations</h2>
+          <p class="text-xs text-ink-600 mb-4">Anything we should route around? E.g. "left knee tendinitis, avoid deep loaded knee flexion." Optional.</p>
+          <textarea id="injuries" placeholder="leave blank if nothing applies"></textarea>
+        </div>
 
-    const res = await fetch("/login", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-            email: email,
-            password: document.getElementById("password").value
-        })
-    });
+        <div class="card">
+          <h2 class="font-display text-lg font-semibold mb-1">Location</h2>
+          <p class="text-xs text-ink-600 mb-4">Used for weather lookup when outdoor recommendations make sense.</p>
+          <input type="text" id="city" placeholder="Corona, CA" class="max-w-md">
+        </div>
 
-    const data = await res.json();
+        <div class="flex gap-3">
+          <button onclick="saveProfile()" class="btn btn-primary">Save profile</button>
+          <button onclick="navigate('dashboard')" class="btn btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </section>
 
-    if (data.message === "Login successful") {
-        currentUser = email;
-        document.getElementById("auth").style.display = "none";
-        document.getElementById("menu").style.display = "block";
+    <!-- ========== SEMESTER ========== -->
+    <section id="page-semester" class="page">
+      <h1 class="font-display text-4xl font-semibold mb-2">Semester</h1>
+      <p class="text-ink-600 mb-8 max-w-xl">Set your class schedule once per term. Starting a new semester deactivates the previous one.</p>
 
-        await checkYesterdayAndLoad();
-    } else {
-        document.getElementById("authMsg").innerText = data.message;
+      <div id="semester-active-banner" class="hidden card mb-6 border-cadence-dark">
+        <div class="flex items-center gap-3">
+          <span id="sem-active-pill" class="pill pill-cadence">Active</span>
+          <span id="sem-active-label" class="font-display text-xl"></span>
+          <span id="sem-active-dates" class="text-xs text-ink-600 font-mono ml-auto"></span>
+        </div>
+      </div>
+
+      <div class="card space-y-5">
+        <div class="grid md:grid-cols-3 gap-4">
+          <div><label class="text-xs text-ink-600 block mb-1">Label</label><input type="text" id="sem-label" placeholder="Fall 2026"></div>
+          <div><label class="text-xs text-ink-600 block mb-1">Start date</label><input type="date" id="sem-start"></div>
+          <div><label class="text-xs text-ink-600 block mb-1">End date</label><input type="date" id="sem-end"></div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="font-display text-lg font-semibold">Classes</h2>
+            <button onclick="addClassRow()" class="btn btn-secondary text-xs">+ Add class</button>
+          </div>
+          <p class="text-xs text-ink-600 mb-3">Pick the days a class meets. MWF? Check Mon, Wed, Fri — no need for separate rows.</p>
+          <div id="class-rows" class="space-y-3"></div>
+        </div>
+
+        <div class="flex gap-3 pt-2">
+          <button onclick="saveSemester()" class="btn btn-primary">Save semester</button>
+          <button onclick="navigate('dashboard')" class="btn btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== WEEKLY PLAN ========== -->
+    <section id="page-weekly-plan" class="page">
+      <h1 class="font-display text-4xl font-semibold mb-2">This week</h1>
+      <p class="text-ink-600 mb-8 max-w-xl">Update Monday morning. Previous week archives to history automatically.</p>
+
+      <div class="card space-y-6">
+        <div class="max-w-xs">
+          <label class="text-xs text-ink-600 block mb-1">Week starts (Monday)</label>
+          <input type="date" id="week-start">
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="font-display text-lg font-semibold">Work shifts</h2>
+            <button onclick="addWorkRow()" class="btn btn-secondary text-xs">+ Add shift</button>
+          </div>
+          <p class="text-xs text-ink-600 mb-3">Same shift on multiple days? Pick all the days at once.</p>
+          <div id="work-rows" class="space-y-3"></div>
+        </div>
+
+        <div>
+          <h2 class="font-display text-lg font-semibold mb-1">Study hours per day</h2>
+          <p class="text-xs text-ink-600 mb-3">Outside of class. Heavier weeks get heavier numbers.</p>
+          <div class="grid grid-cols-7 gap-2">
+            <div><label class="text-xs text-ink-600 block mb-1 text-center font-mono">MON</label><input type="number" id="study-mon" min="0" max="24" step="0.5" value="0"></div>
+            <div><label class="text-xs text-ink-600 block mb-1 text-center font-mono">TUE</label><input type="number" id="study-tue" min="0" max="24" step="0.5" value="0"></div>
+            <div><label class="text-xs text-ink-600 block mb-1 text-center font-mono">WED</label><input type="number" id="study-wed" min="0" max="24" step="0.5" value="0"></div>
+            <div><label class="text-xs text-ink-600 block mb-1 text-center font-mono">THU</label><input type="number" id="study-thu" min="0" max="24" step="0.5" value="0"></div>
+            <div><label class="text-xs text-ink-600 block mb-1 text-center font-mono">FRI</label><input type="number" id="study-fri" min="0" max="24" step="0.5" value="0"></div>
+            <div><label class="text-xs text-ink-600 block mb-1 text-center font-mono">SAT</label><input type="number" id="study-sat" min="0" max="24" step="0.5" value="0"></div>
+            <div><label class="text-xs text-ink-600 block mb-1 text-center font-mono">SUN</label><input type="number" id="study-sun" min="0" max="24" step="0.5" value="0"></div>
+          </div>
+        </div>
+
+        <div class="flex gap-3 pt-2">
+          <button onclick="savePlan()" class="btn btn-primary">Save week's plan</button>
+          <button onclick="navigate('dashboard')" class="btn btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== WORKOUTS (full history view) ========== -->
+    <section id="page-workouts" class="page">
+      <h1 class="font-display text-4xl font-semibold mb-2">Workouts</h1>
+      <p class="text-ink-600 mb-8 max-w-xl">Full check-in history. Quick logging is on the dashboard.</p>
+
+      <div class="card mb-6">
+        <h2 class="font-display text-lg font-semibold mb-4">Log a check-in (any date)</h2>
+        <p class="text-xs text-ink-600 mb-4">Use this to backfill missed days. The dashboard handles "yesterday" by default.</p>
+
+        <div class="grid md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="text-xs text-ink-600 block mb-1">Date</label>
+            <input type="date" id="wo-date">
+          </div>
+          <div>
+            <label class="text-xs text-ink-600 block mb-1">Sleep (hrs)</label>
+            <input type="number" id="sleep-hours" min="0" max="14" step="0.25" placeholder="7.5">
+          </div>
+        </div>
+
+        <label class="flex items-center gap-3 cursor-pointer mb-4">
+          <input type="checkbox" id="did-workout" onchange="toggleWorkoutFields()">
+          <span class="text-sm">I worked out that day</span>
+        </label>
+
+        <div id="workout-fields" class="hidden space-y-4">
+          <div>
+            <label class="text-xs text-ink-600 block mb-1">Type</label>
+            <input type="text" id="workout-type" placeholder="upper push, legs, run, full body…" class="max-w-md">
+          </div>
+          <div class="grid grid-cols-2 gap-4 max-w-md">
+            <div>
+              <label class="text-xs text-ink-600 block mb-1">Duration</label>
+              <div class="flex items-center gap-2">
+                <input type="number" id="duration" min="1" max="600" step="5" placeholder="60">
+                <span class="text-xs text-ink-600 font-mono">MIN</span>
+              </div>
+            </div>
+            <div>
+              <label class="text-xs text-ink-600 block mb-1">Intensity</label>
+              <div class="flex items-center gap-2">
+                <input type="number" id="intensity" min="1" max="10" placeholder="7">
+                <span class="text-xs text-ink-600 font-mono">/ 10</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4">
+          <label class="text-xs text-ink-600 block mb-1">Notes (optional)</label>
+          <textarea id="notes"></textarea>
+        </div>
+
+        <div class="flex gap-3 mt-5">
+          <button onclick="saveWorkout()" class="btn btn-primary">Save</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="font-display text-lg font-semibold mb-4">History</h2>
+        <div id="wo-history">
+          <p class="text-sm text-ink-600 py-4">Loading…</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== ATHLETIC ========== -->
+    <section id="page-athletic" class="page">
+      <h1 class="font-display text-4xl font-semibold mb-2">Athletic activity</h1>
+      <p class="text-ink-600 mb-8 max-w-xl">Practices, games, scrimmages. Used in your daily plan so the gym work doesn't conflict with your sport. Backfill up to 7 days.</p>
+
+      <div class="card mb-6">
+        <h2 class="font-display text-lg font-semibold mb-4">Log an activity</h2>
+
+        <div class="grid md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="text-xs text-ink-600 block mb-1">Date</label>
+            <input type="date" id="ath-date">
+          </div>
+          <div>
+            <label class="text-xs text-ink-600 block mb-1">Type</label>
+            <select id="ath-type">
+              <option value="practice">Practice</option>
+              <option value="game">Game</option>
+              <option value="scrimmage">Scrimmage</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-ink-600 block mb-1">Duration</label>
+            <div class="flex items-center gap-2">
+              <input type="number" id="ath-duration" min="1" max="600" step="5" placeholder="90">
+              <span class="text-xs text-ink-600 font-mono">MIN</span>
+            </div>
+          </div>
+          <div>
+            <label class="text-xs text-ink-600 block mb-1">Intensity</label>
+            <div class="flex items-center gap-2">
+              <input type="number" id="ath-intensity" min="1" max="10" placeholder="7">
+              <span class="text-xs text-ink-600 font-mono">/ 10</span>
+            </div>
+          </div>
+        </div>
+
+        <label class="text-xs text-ink-600 block mb-1">What did you do?</label>
+        <textarea id="ath-description" placeholder="full-court drills + scrimmage; pickup game; conditioning focus, etc."></textarea>
+
+        <div class="flex gap-3 mt-5">
+          <button onclick="saveActivity()" class="btn btn-primary">Save activity</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="font-display text-lg font-semibold mb-4">Recent</h2>
+        <div id="ath-history">
+          <p class="text-sm text-ink-600 py-4">Loading…</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="toast"></div>
+
+  <script>
+    // ===================== Constants =====================
+    const PAGES = ['home', 'dashboard', 'profile', 'semester', 'weekly-plan', 'workouts', 'athletic'];
+    const DAYS = ['mon','tue','wed','thu','fri','sat','sun'];
+    const DAYS_DISPLAY = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const GOALS = ['hypertrophy', 'strength', 'aesthetics', 'endurance', 'weight_loss', 'general', 'sports_training'];
+    const SPORTS = ['basketball','soccer','football','volleyball','baseball','softball','tennis','swimming',
+                    'running','lacrosse','wrestling','golf','hockey','rugby','cheerleading','dance',
+                    'martial_arts','rowing','cross_country','other'];
+
+    let authState = { authenticated: false, is_athlete: false };
+
+    // ===================== Routing =====================
+    function navigate(route) {
+      if (window.location.hash.slice(1) !== route) { window.location.hash = route; return; }
+      renderRoute(route);
     }
-}
+    function renderRoute(route) {
+      if (!PAGES.includes(route)) route = authState.authenticated ? 'dashboard' : 'home';
+      if (!authState.authenticated && route !== 'home') route = 'home';
+      if (route === 'athletic' && !authState.is_athlete) route = 'dashboard';
 
-async function checkYesterdayAndLoad() {
-    const res = await fetch("/check_yesterday", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ email: currentUser })
+      PAGES.forEach(p => {
+        const el = document.getElementById('page-' + p);
+        if (el) el.classList.toggle('active', p === route);
+      });
+      document.querySelectorAll('.nav-link').forEach(a => {
+        a.classList.toggle('active', a.dataset.route === route);
+      });
+
+      if (route === 'dashboard')   loadDashboard();
+      if (route === 'profile')     loadProfile();
+      if (route === 'semester')    loadSemester();
+      if (route === 'weekly-plan') loadWeeklyPlan();
+      if (route === 'workouts')    loadWorkouts();
+      if (route === 'athletic')    loadAthletic();
+    }
+    window.addEventListener('hashchange', () => renderRoute(window.location.hash.slice(1)));
+    document.addEventListener('click', e => {
+      const a = e.target.closest('[data-route]');
+      if (!a) return;
+      e.preventDefault();
+      navigate(a.dataset.route);
     });
 
-    const data = await res.json();
+    // ===================== API helper =====================
+    async function call(path, method='GET', body=null) {
+      const opts = { method, credentials: 'same-origin' };
+      if (body) {
+        opts.headers = { 'Content-Type': 'application/json' };
+        opts.body = JSON.stringify(body);
+      }
+      const r = await fetch(path, opts);
+      const data = await r.json().catch(() => ({}));
+      return { status: r.status, data };
+    }
 
-    if (data.has_today_prediction && data.today_prediction) {
-        hideAll();
-        document.getElementById("recommendSection").style.display = "block";
-        displayRecommendation(
-            data.today_prediction.prediction,
-            data.today_prediction.explanation,
-            data.today_prediction.readiness_score || "N/A",
-            ""
-        );
+    // ===================== Toast =====================
+    let toastTimer = null;
+    function toast(msg, kind='ok') {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.className = '';
+      el.classList.add(kind, 'show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+    }
+    function flatErr(d) { return (d.details || [d.error || 'failed']).join('; '); }
 
-    } else if (data.needs_input) {
-        hideAll();
-        document.getElementById("inputSection").style.display = "block";
+    // ===================== Date helpers =====================
+    function ymd(d) {
+      // Returns YYYY-MM-DD in local time
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      const day = String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${day}`;
+    }
+    function startOfWeek() {
+      const d = new Date();
+      const dow = d.getDay() || 7; // sun=0 -> 7
+      d.setDate(d.getDate() - (dow - 1));
+      d.setHours(0,0,0,0);
+      return d;
+    }
+    function yesterdayDate() {
+      const d = new Date(); d.setDate(d.getDate()-1); d.setHours(0,0,0,0); return d;
+    }
 
-    } else {
-        const predRes = await fetch("/auto_predict", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ email: currentUser })
-        });
+    // ===================== Auth =====================
+    function switchAuthTab(tab) {
+      const isSignup = tab === 'signup';
+      const su = document.getElementById('tab-signup');
+      const li = document.getElementById('tab-login');
+      su.classList.toggle('border-cadence', isSignup);    su.classList.toggle('text-cadence', isSignup);
+      su.classList.toggle('text-ink-600', !isSignup);     su.classList.toggle('border-transparent', !isSignup);
+      li.classList.toggle('border-cadence', !isSignup);   li.classList.toggle('text-cadence', !isSignup);
+      li.classList.toggle('text-ink-600', isSignup);      li.classList.toggle('border-transparent', isSignup);
+      document.getElementById('form-signup').classList.toggle('hidden', !isSignup);
+      document.getElementById('form-login').classList.toggle('hidden', isSignup);
+    }
 
-        const predData = await predRes.json();
+    async function doSignup() {
+      const body = {
+        username: document.getElementById('su-username').value,
+        email:    document.getElementById('su-email').value,
+        password: document.getElementById('su-password').value,
+      };
+      const { status, data } = await call('/api/auth/signup', 'POST', body);
+      if (status === 201) {
+        toast('Welcome to Cadence');
+        await refreshAuthState();
+        navigate('profile');
+      } else { toast(flatErr(data), 'bad'); }
+    }
+    async function doLogin() {
+      const body = {
+        email:    document.getElementById('li-email').value,
+        password: document.getElementById('li-password').value,
+      };
+      const { status, data } = await call('/api/auth/login', 'POST', body);
+      if (status === 200) {
+        toast('Signed in');
+        await refreshAuthState();
+        navigate('dashboard');
+      } else { toast(flatErr(data), 'bad'); }
+    }
+    async function logout() {
+      await call('/api/auth/logout', 'POST');
+      authState = { authenticated: false, is_athlete: false };
+      updateAuthUI(authState);
+      navigate('home');
+      toast('Signed out');
+    }
+    function updateAuthUI(state) {
+      const nav = document.getElementById('auth-nav');
+      const logoutBtn = document.getElementById('nav-logout');
+      const userEl = document.getElementById('nav-user');
+      const athNav = document.getElementById('nav-athletic');
+      if (state.authenticated) {
+        nav.classList.remove('hidden'); nav.classList.add('flex');
+        logoutBtn.classList.remove('hidden');
+        userEl.classList.remove('hidden');
+        userEl.textContent = '@' + (state.username || '');
+        athNav.classList.toggle('hidden', !state.is_athlete);
+      } else {
+        nav.classList.add('hidden'); nav.classList.remove('flex');
+        logoutBtn.classList.add('hidden');
+        userEl.classList.add('hidden');
+        userEl.textContent = '';
+        athNav.classList.add('hidden');
+      }
+    }
+    async function refreshAuthState() {
+      const { data } = await call('/api/auth/whoami');
+      authState = data || { authenticated: false };
+      updateAuthUI(authState);
+      return authState;
+    }
 
-        if (predData.prediction) {
-            hideAll();
-            document.getElementById("recommendSection").style.display = "block";
-            displayRecommendation(
-                predData.prediction,
-                predData.explanation,
-                predData.readiness_score || "N/A",
-                ""
-            );
-        } else {
-            hideAll();
-            document.getElementById("inputSection").style.display = "block";
+    // ===================== DOW chips =====================
+    function dowChips(prefix, selectedDays) {
+      const sel = new Set(selectedDays || []);
+      return DAYS.map(d => `
+        <label class="dow-chip ${sel.has(d) ? 'selected' : ''}" data-day="${d}">
+          <input type="checkbox" class="${prefix}-dow" value="${d}" ${sel.has(d) ? 'checked' : ''}>
+          ${d.toUpperCase()}
+        </label>`).join('');
+    }
+    document.addEventListener('change', e => {
+      if (e.target.matches('input[type="checkbox"][class*="-dow"]')) {
+        e.target.closest('.dow-chip')?.classList.toggle('selected', e.target.checked);
+      }
+    });
+
+    // ===================== Dashboard =====================
+    async function loadDashboard() {
+      const me = await refreshAuthState();
+      document.getElementById('dash-username').textContent = me.username || '—';
+      const now = new Date();
+      document.getElementById('dash-date').textContent =
+        now.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'}).toUpperCase();
+
+      await loadCheckIn();
+      await loadWeekCalendar();
+      await loadStatusTiles();
+    }
+
+    // ----- Inline daily check-in -----
+    async function loadCheckIn() {
+      const yDate = yesterdayDate();
+      const yISO = ymd(yDate);
+      const { data } = await call('/api/workouts');
+      const log = (data.workouts || []).find(w => w.date.slice(0,10) === yISO);
+
+      const subtitle = document.getElementById('checkin-subtitle');
+      const pill = document.getElementById('checkin-status-pill');
+      const form = document.getElementById('checkin-form');
+      const completed = document.getElementById('checkin-completed');
+
+      subtitle.textContent = `For ${yDate.toLocaleDateString('en-US',{weekday:'long', month:'short', day:'numeric'})}`;
+
+      if (log) {
+        // Already logged - show summary
+        form.classList.add('hidden');
+        completed.classList.remove('hidden');
+        pill.className = 'pill pill-ok'; pill.textContent = 'Logged';
+        document.getElementById('ci-sleep').textContent = log.sleep_hours != null ? log.sleep_hours + 'h' : '—';
+        document.getElementById('ci-workout').textContent = log.did_workout ? log.workout_type : 'Rest day';
+        document.getElementById('ci-duration').textContent = log.duration_minutes ? log.duration_minutes + 'min' : '—';
+        document.getElementById('ci-intensity').textContent = log.intensity ? log.intensity + '/10' : '—';
+      } else {
+        form.classList.remove('hidden');
+        completed.classList.add('hidden');
+        pill.className = 'pill pill-warn'; pill.textContent = 'Pending';
+      }
+    }
+    function toggleDashWorkoutFields() {
+      const did = document.getElementById('dash-did-workout').checked;
+      document.getElementById('dash-workout-fields').classList.toggle('hidden', !did);
+    }
+    function editDashCheckIn() {
+      document.getElementById('checkin-form').classList.remove('hidden');
+      document.getElementById('checkin-completed').classList.add('hidden');
+    }
+    async function saveDashCheckIn() {
+      const did = document.getElementById('dash-did-workout').checked;
+      const sleepRaw = document.getElementById('dash-sleep').value;
+      const body = {
+        did_workout: did,
+        sleep_hours: sleepRaw ? parseFloat(sleepRaw) : null,
+        notes: document.getElementById('dash-notes').value || null,
+      };
+      if (did) {
+        body.workout_type = document.getElementById('dash-workout-type').value;
+        body.duration_minutes = parseInt(document.getElementById('dash-duration').value || '0', 10);
+        body.intensity = parseInt(document.getElementById('dash-intensity').value, 10);
+      }
+      const { status, data } = await call('/api/workouts', 'POST', body);
+      if (status === 201) {
+        toast('Check-in saved');
+        document.getElementById('dash-did-workout').checked = false;
+        toggleDashWorkoutFields();
+        document.getElementById('dash-sleep').value = '';
+        document.getElementById('dash-notes').value = '';
+        await loadCheckIn();
+        await loadWeekCalendar();
+
+        // If yesterday's data triggers a revision rule, offer to regenerate
+        const lowSleep   = sleepRaw && parseFloat(sleepRaw) < 6;
+        const highIntensity = did && body.intensity >= 9;
+        if (lowSleep || highIntensity) {
+          if (confirm("That data may change today's recommendation. Regenerate now?")) {
+            await regenerateToday();
+          }
         }
+      } else { toast(flatErr(data), 'bad'); }
     }
-}
 
-async function predict() {
-    // Show loading state
-    hideAll();
-    document.getElementById("recommendSection").style.display = "block";
-    document.getElementById("readiness-display").innerHTML = "";
-    document.getElementById("recommendation-title").innerText = "";
-    document.getElementById("llm-response").style.display = "block";
-    document.getElementById("llm-response").innerHTML = '<div class="loading">Analyzing your data and generating recommendation...</div>';
+    // ----- Weekly calendar -----
+    async function loadWeekCalendar() {
+      const grid = document.getElementById('week-grid');
+      const empty = document.getElementById('cal-empty');
+      const range = document.getElementById('cal-range');
 
-    const data = {
-        email: currentUser,
-        sleep_hours: parseFloat(document.getElementById("sleep").value) || 0,
-        TotalSteps: parseFloat(document.getElementById("steps").value) || 0,
-        TotalCalories: parseFloat(document.getElementById("calories").value) || 0,
-        heart_rate: parseFloat(document.getElementById("hr").value) || 0,
-        very_active_min: parseFloat(document.getElementById("very_active").value) || 0,
-        fairly_active_min: parseFloat(document.getElementById("fairly_active").value) || 0,
-        lightly_active_min: parseFloat(document.getElementById("lightly_active").value) || 0
-    };
+      const monday = startOfWeek();
+      const sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
+      range.textContent =
+        monday.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' – ' +
+        sunday.toLocaleDateString('en-US',{month:'short',day:'numeric'});
 
-    const res = await fetch("/predict", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(data)
+      const { data } = await call('/api/recommendations/week');
+      const recs = data.recommendations || [];
+      const completedDates = new Set(data.completed_dates || []);
+      const today = ymd(new Date());
+
+      // Build 7 cells
+      const cells = [];
+      for (let i = 0; i < 7; i++) {
+        const day = new Date(monday); day.setDate(monday.getDate()+i);
+        const dayISO = ymd(day);
+        const rec = recs.find(r => r.date.slice(0,10) === dayISO);
+        const isToday = dayISO === today;
+        const isCompleted = completedDates.has(dayISO);
+
+        const classes = ['cal-day'];
+        if (isToday) classes.push('today');
+        if (isCompleted) classes.push('completed');
+        if (rec && rec.is_rest_day) classes.push('rest');
+
+        let body;
+        if (rec) {
+          if (rec.is_rest_day) {
+            body = `<div class="text-xs text-ink-600 mt-auto"><span class="pill pill-mute">Rest</span></div>`;
+          } else {
+            body = `
+              <div class="mt-auto">
+                <p class="font-display text-sm leading-tight mb-1">${rec.workout_type || '—'}</p>
+                <div class="flex items-center gap-1.5 text-xs">
+                  ${rec.recommended_time ? `<span class="font-mono text-cadence">${rec.recommended_time}</span>` : ''}
+                  ${rec.intensity ? `<span class="pill pill-cadence" style="font-size:0.6rem;padding:0.05rem 0.4rem">${rec.intensity}</span>` : ''}
+                </div>
+                ${rec.duration_minutes ? `<p class="font-mono text-xs text-ink-500 mt-1">${rec.duration_minutes} min</p>` : ''}
+              </div>`;
+          }
+        } else {
+          body = `<div class="mt-auto text-xs text-ink-500 italic">—</div>`;
+        }
+
+        const tooltip = rec && rec.reasoning ? ` title="${rec.reasoning.replace(/"/g, '&quot;')}"` : '';
+
+        cells.push(`
+          <div class="${classes.join(' ')}"${tooltip}>
+            <div class="cal-head">
+              <span>${DAYS_DISPLAY[i]}</span>
+              <span class="cal-num">${day.getDate()}</span>
+            </div>
+            ${isCompleted ? '<span class="cal-check" title="Completed">✓</span>' : ''}
+            ${body}
+          </div>`);
+      }
+      grid.innerHTML = cells.join('');
+
+      // Show empty state hint if NO recommendations exist for the week
+      empty.classList.toggle('hidden', recs.length > 0);
+    }
+
+    async function generateWeek() {
+      const btn = document.getElementById('generate-week-btn');
+      btn.disabled = true;
+      btn.textContent = 'Generating...';
+      try {
+        const { status, data } = await call('/api/recommendations/week', 'POST');
+        if (status === 201) {
+          toast(`Week plan generated (${data.days_stored} days)`);
+          await loadWeekCalendar();
+        } else {
+          toast(data.error || 'Failed to generate', 'bad');
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Generate week's plan";
+      }
+    }
+
+    async function regenerateToday() {
+      try {
+        const { status, data } = await call('/api/recommendations/today/regenerate', 'POST');
+        if (status === 201) {
+          toast('Today regenerated');
+          await loadWeekCalendar();
+        } else {
+          toast(data.error || 'Failed to regenerate', 'bad');
+        }
+      } catch (e) {
+        toast('Network error', 'bad');
+      }
+    }
+
+    // ----- Status tiles -----
+    async function loadStatusTiles() {
+      const me = authState;
+      const profPill = document.getElementById('dash-profile-pill');
+      const profSummary = document.getElementById('dash-profile-summary');
+      const profDetail = document.getElementById('dash-profile-detail');
+      if (me.profile_completed) {
+        const { data: p } = await call('/api/profile');
+        profPill.className = 'pill pill-ok'; profPill.textContent = 'Complete';
+        profSummary.textContent = (p.profile.fitness_goals || []).join(' + ') || 'general';
+        const sportSuffix = p.profile.sport ? ` · ${p.profile.sport === 'other' ? p.profile.sport_other : p.profile.sport}` : '';
+        profDetail.textContent = `${p.profile.location?.city || '—'} · $${p.profile.budget_monthly_usd || 0}/mo${sportSuffix}`;
+      } else {
+        profPill.className = 'pill pill-warn'; profPill.textContent = 'Incomplete';
+        profSummary.textContent = 'Set up your profile';
+        profDetail.textContent = 'Goals, gym budget, energy';
+      }
+
+      const { data: sd } = await call('/api/semesters/active');
+      const semPill = document.getElementById('dash-semester-pill');
+      const semSummary = document.getElementById('dash-semester-summary');
+      const semDetail = document.getElementById('dash-semester-detail');
+      if (sd.semester) {
+        const active = sd.semester.is_currently_active;
+        semPill.className = 'pill ' + (active ? 'pill-ok' : 'pill-mute');
+        semPill.textContent = active ? 'Active' : 'Past';
+        semSummary.textContent = sd.semester.label;
+        semDetail.textContent = `${sd.semester.classes.length} classes scheduled`;
+      } else {
+        semPill.className = 'pill pill-warn'; semPill.textContent = 'None';
+        semSummary.textContent = 'No semester';
+        semDetail.textContent = 'Add your class schedule';
+      }
+
+      const { data: wd } = await call('/api/weekly-plan');
+      const wkPill = document.getElementById('dash-week-pill');
+      const wkSummary = document.getElementById('dash-week-summary');
+      const wkDetail = document.getElementById('dash-week-detail');
+      if (wd.current_week) {
+        const totalStudy = Object.values(wd.current_week.study_hours || {}).reduce((a,b) => a+b, 0);
+        wkPill.className = 'pill pill-ok'; wkPill.textContent = 'Set';
+        wkSummary.innerHTML = `<span class="stat-num">${totalStudy}</span><span class="text-base text-ink-600 ml-1">study hrs planned</span>`;
+        wkDetail.textContent = `${(wd.current_week.work_blocks || []).length} work blocks this week`;
+      } else {
+        wkPill.className = 'pill pill-warn'; wkPill.textContent = 'Not set';
+        wkSummary.textContent = 'No plan yet';
+        wkDetail.textContent = 'Work + study hours per day';
+      }
+    }
+
+    async function loadPreview(kind) {
+      const path = kind === 'weekly' ? '/api/prompt-preview/weekly' : '/api/prompt-preview';
+      const { status, data } = await call(path);
+      const el = document.getElementById('preview-out');
+      if (status !== 200) { el.textContent = 'Error: ' + (data.error || status); return; }
+      el.textContent = '── SYSTEM ──\n' + data.system_prompt + '\n\n── USER ──\n' + data.user_prompt;
+    }
+
+    // ===================== Profile =====================
+    function renderGoalsGrid(selected) {
+      const sel = new Set(selected || []);
+      document.getElementById('goals-grid').innerHTML = GOALS.map(g => `
+        <label class="card-row hover:border-ink-400 cursor-pointer flex items-center gap-3 transition-colors">
+          <input type="checkbox" class="goal-cb" value="${g}" ${sel.has(g) ? 'checked' : ''}>
+          <span class="text-sm capitalize">${g.replace('_', ' ')}</span>
+        </label>`).join('');
+      document.querySelectorAll('.goal-cb').forEach(cb => cb.addEventListener('change', updateSportVisibility));
+      updateSportVisibility();
+    }
+    function updateSportVisibility() {
+      const isAthlete = Array.from(document.querySelectorAll('.goal-cb:checked')).some(cb => cb.value === 'sports_training');
+      document.getElementById('sport-section').classList.toggle('hidden', !isAthlete);
+    }
+    function populateSportDropdown(selected) {
+      document.getElementById('sport').innerHTML =
+        '<option value="">— pick one —</option>' +
+        SPORTS.map(s => `<option value="${s}" ${selected===s?'selected':''}>${s.replace('_',' ')}</option>`).join('');
+    }
+    document.addEventListener('change', e => {
+      if (e.target && e.target.id === 'sport') {
+        document.getElementById('sport-other-wrap').classList.toggle('hidden', e.target.value !== 'other');
+      }
     });
 
-    const result = await res.json();
+    async function loadProfile() {
+      const { data } = await call('/api/profile');
+      const p = data.profile || {};
+      renderGoalsGrid(p.fitness_goals);
+      populateSportDropdown(p.sport);
+      if (p.sport === 'other' && p.sport_other) {
+        document.getElementById('sport-other-wrap').classList.remove('hidden');
+        document.getElementById('sport-other').value = p.sport_other;
+      }
+      if (p.team_context) document.getElementById('team-context').value = p.team_context;
+      if (p.budget_monthly_usd != null) document.getElementById('budget').value = p.budget_monthly_usd;
+      if (p.energy_levels) {
+        document.getElementById('energy-morning').value   = p.energy_levels.morning;
+        document.getElementById('energy-afternoon').value = p.energy_levels.afternoon;
+        document.getElementById('energy-evening').value   = p.energy_levels.evening;
+      }
+      if (p.injuries_limitations) document.getElementById('injuries').value = p.injuries_limitations;
+      if (p.location?.city) document.getElementById('city').value = p.location.city;
+    }
+    async function saveProfile() {
+      const goals = Array.from(document.querySelectorAll('.goal-cb:checked')).map(cb => cb.value);
+      const isAthlete = goals.includes('sports_training');
+      const body = {
+        fitness_goals: goals,
+        budget_monthly_usd: parseInt(document.getElementById('budget').value || '0', 10),
+        energy_levels: {
+          morning:   parseInt(document.getElementById('energy-morning').value, 10),
+          afternoon: parseInt(document.getElementById('energy-afternoon').value, 10),
+          evening:   parseInt(document.getElementById('energy-evening').value, 10),
+        },
+        injuries_limitations: document.getElementById('injuries').value || null,
+        location: { city: document.getElementById('city').value },
+      };
+      if (isAthlete) {
+        body.sport = document.getElementById('sport').value || null;
+        body.sport_other = document.getElementById('sport-other').value || null;
+        body.team_context = document.getElementById('team-context').value || null;
+      }
+      const { status, data } = await call('/api/profile', 'POST', body);
+      if (status === 200) {
+        toast('Profile saved');
+        await refreshAuthState();
+        navigate('dashboard');
+      } else { toast(flatErr(data), 'bad'); }
+    }
 
-    displayRecommendation(
-        result.prediction,
-        result.explanation,
-        result.readiness_score || "N/A",
-        ""
-    );
-}
+    // ===================== Semester =====================
+    function addClassRow(prefill) {
+      const div = document.createElement('div');
+      div.className = 'card-row space-y-2';
+      div.innerHTML = `
+        <div class="flex flex-wrap items-center gap-2">
+          <input type="text" placeholder="CS101 Lecture" class="cls-label flex-1 min-w-[12rem]" value="${prefill?.label || ''}">
+          <input type="time" class="cls-start w-32" value="${prefill?.start_time || ''}">
+          <span class="text-ink-500 text-sm">to</span>
+          <input type="time" class="cls-end w-32" value="${prefill?.end_time || ''}">
+          <button class="btn-danger btn" onclick="this.closest('.card-row').remove()">Remove</button>
+        </div>
+        <div class="dow-group">${dowChips('cls', prefill?.days || [])}</div>`;
+      document.getElementById('class-rows').appendChild(div);
+    }
+    async function loadSemester() {
+      document.getElementById('class-rows').innerHTML = '';
+      const { data } = await call('/api/semesters/active');
+      const sem = data.semester;
+      const banner = document.getElementById('semester-active-banner');
+      if (sem) {
+        banner.classList.remove('hidden');
+        const pill = document.getElementById('sem-active-pill');
+        if (sem.is_currently_active) {
+          pill.className = 'pill pill-cadence'; pill.textContent = 'Active';
+        } else {
+          pill.className = 'pill pill-mute'; pill.textContent = 'Past';
+        }
+        document.getElementById('sem-active-label').textContent = sem.label;
+        document.getElementById('sem-active-dates').textContent =
+          `${new Date(sem.start_date).toLocaleDateString()} → ${new Date(sem.end_date).toLocaleDateString()}`;
+        document.getElementById('sem-label').value = sem.label;
+        document.getElementById('sem-start').value = sem.start_date.slice(0, 10);
+        document.getElementById('sem-end').value   = sem.end_date.slice(0, 10);
 
-async function loadChart() {
-    const res = await fetch("/visualization", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({ email: currentUser })
-    });
+        const groups = {};
+        sem.classes.forEach(c => {
+          const k = `${c.label}|${c.start_time}|${c.end_time}`;
+          if (!groups[k]) groups[k] = { label: c.label, start_time: c.start_time, end_time: c.end_time, days: [] };
+          groups[k].days.push(c.day_of_week);
+        });
+        Object.values(groups).forEach(g => addClassRow(g));
+      } else {
+        banner.classList.add('hidden');
+        addClassRow();
+      }
+    }
+    async function saveSemester() {
+      const classes = [];
+      document.querySelectorAll('#class-rows > .card-row').forEach(row => {
+        const label = row.querySelector('.cls-label').value;
+        const start = row.querySelector('.cls-start').value;
+        const end   = row.querySelector('.cls-end').value;
+        const days  = Array.from(row.querySelectorAll('.cls-dow:checked')).map(cb => cb.value);
+        days.forEach(d => classes.push({ label, day_of_week: d, start_time: start, end_time: end }));
+      });
+      const body = {
+        label: document.getElementById('sem-label').value,
+        start_date: document.getElementById('sem-start').value,
+        end_date: document.getElementById('sem-end').value,
+        classes,
+      };
+      const { status, data } = await call('/api/semesters', 'POST', body);
+      if (status === 201) { toast('Semester saved'); navigate('dashboard'); }
+      else toast(flatErr(data), 'bad');
+    }
 
-    const data = await res.json();
+    // ===================== Weekly plan =====================
+    function addWorkRow(prefill) {
+      const div = document.createElement('div');
+      div.className = 'card-row space-y-2';
+      div.innerHTML = `
+        <div class="flex flex-wrap items-center gap-2">
+          <input type="time" class="wk-start w-32" value="${prefill?.start_time || ''}">
+          <span class="text-ink-500 text-sm">to</span>
+          <input type="time" class="wk-end w-32" value="${prefill?.end_time || ''}">
+          <button class="btn-danger btn" onclick="this.closest('.card-row').remove()">Remove</button>
+        </div>
+        <div class="dow-group">${dowChips('wk', prefill?.days || [])}</div>`;
+      document.getElementById('work-rows').appendChild(div);
+    }
+    function lastMondayISO() { return ymd(startOfWeek()); }
 
-    const container = document.getElementById("vizImages");
-    container.innerHTML = "";
+    async function loadWeeklyPlan() {
+      document.getElementById('work-rows').innerHTML = '';
+      document.getElementById('week-start').value = lastMondayISO();
+      const { data } = await call('/api/weekly-plan');
+      const plan = data.current_week;
+      if (plan) {
+        document.getElementById('week-start').value = plan.week_start.slice(0, 10);
+        const groups = {};
+        (plan.work_blocks || []).forEach(b => {
+          const k = `${b.start_time}|${b.end_time}`;
+          if (!groups[k]) groups[k] = { start_time: b.start_time, end_time: b.end_time, days: [] };
+          groups[k].days.push(b.day_of_week);
+        });
+        Object.values(groups).forEach(g => addWorkRow(g));
+        Object.entries(plan.study_hours || {}).forEach(([day, h]) => {
+          const el = document.getElementById('study-' + day);
+          if (el) el.value = h;
+        });
+      }
+    }
+    async function savePlan() {
+      const work_blocks = [];
+      document.querySelectorAll('#work-rows > .card-row').forEach(row => {
+        const start = row.querySelector('.wk-start').value;
+        const end   = row.querySelector('.wk-end').value;
+        const days  = Array.from(row.querySelectorAll('.wk-dow:checked')).map(cb => cb.value);
+        days.forEach(d => work_blocks.push({ day_of_week: d, start_time: start, end_time: end }));
+      });
+      const study_hours = {};
+      DAYS.forEach(d => { study_hours[d] = parseFloat(document.getElementById('study-' + d).value || '0'); });
+      const body = { week_start: document.getElementById('week-start').value, work_blocks, study_hours };
+      const { status, data } = await call('/api/weekly-plan', 'POST', body);
+      if (status === 200) { toast('Week saved'); navigate('dashboard'); }
+      else toast(flatErr(data), 'bad');
+    }
 
-    data.images.forEach(img => {
-        const image = document.createElement("img");
-        image.src = "data:image/png;base64," + img;
-        image.style.width = "100%";
-        image.style.marginTop = "20px";
-        container.appendChild(image);
-    });
-}
+    // ===================== Workouts page (full history + backfill) =====================
+    function toggleWorkoutFields() {
+      const did = document.getElementById('did-workout').checked;
+      document.getElementById('workout-fields').classList.toggle('hidden', !did);
+    }
+    async function loadWorkouts() {
+      document.getElementById('wo-date').value = ymd(yesterdayDate());
+      const { data } = await call('/api/workouts');
+      const el = document.getElementById('wo-history');
+      if (!data.workouts || data.workouts.length === 0) {
+        el.innerHTML = '<p class="text-sm text-ink-600 py-4">No history yet.</p>';
+        return;
+      }
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Date</th><th>Sleep</th><th>Workout</th><th>Duration</th><th>Intensity</th><th>Notes</th></tr></thead>
+          <tbody>${data.workouts.map(w => `
+            <tr>
+              <td class="font-mono text-xs">${new Date(w.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</td>
+              <td class="font-mono">${w.sleep_hours != null ? `<span class="text-cadence">${w.sleep_hours}</span><span class="text-ink-500">hrs</span>` : '—'}</td>
+              <td>${w.did_workout ? w.workout_type : '<span class="pill pill-mute">Rest</span>'}</td>
+              <td class="font-mono text-ink-700">${w.duration_minutes ? w.duration_minutes + ' min' : '—'}</td>
+              <td class="font-mono">${w.intensity ? `<span class="text-cadence">${w.intensity}</span><span class="text-ink-500">/10</span>` : '—'}</td>
+              <td class="text-ink-600 text-xs">${w.notes || ''}</td>
+            </tr>`).join('')}</tbody>
+        </table>`;
+    }
+    async function saveWorkout() {
+      const did = document.getElementById('did-workout').checked;
+      const sleepRaw = document.getElementById('sleep-hours').value;
+      const body = {
+        date: document.getElementById('wo-date').value,
+        did_workout: did,
+        sleep_hours: sleepRaw ? parseFloat(sleepRaw) : null,
+        notes: document.getElementById('notes').value || null,
+      };
+      if (did) {
+        body.workout_type = document.getElementById('workout-type').value;
+        body.duration_minutes = parseInt(document.getElementById('duration').value || '0', 10);
+        body.intensity = parseInt(document.getElementById('intensity').value, 10);
+      }
+      const { status, data } = await call('/api/workouts', 'POST', body);
+      if (status === 201) {
+        toast('Saved');
+        document.getElementById('did-workout').checked = false;
+        toggleWorkoutFields();
+        document.getElementById('notes').value = '';
+        document.getElementById('sleep-hours').value = '';
+        loadWorkouts();
+      } else { toast(flatErr(data), 'bad'); }
+    }
 
-async function simulate() {
-    // Show loading
-    document.getElementById("sim-llm-response").style.display = "block";
-    document.getElementById("sim-llm-response").innerHTML = '<div class="loading">Simulating...</div>';
-    document.getElementById("sim-readiness-display").innerHTML = "";
-    document.getElementById("sim-recommendation-title").innerText = "";
+    // ===================== Athletic =====================
+    async function loadAthletic() {
+      document.getElementById('ath-date').value = ymd(yesterdayDate());
+      const { data } = await call('/api/athletic-activities');
+      const el = document.getElementById('ath-history');
+      if (!data.activities || data.activities.length === 0) {
+        el.innerHTML = '<p class="text-sm text-ink-600 py-4">Nothing logged yet.</p>';
+        return;
+      }
+      el.innerHTML = `
+        <table>
+          <thead><tr><th>Date</th><th>Type</th><th>Duration</th><th>Intensity</th><th>Description</th></tr></thead>
+          <tbody>${data.activities.map(a => `
+            <tr>
+              <td class="font-mono text-xs">${new Date(a.date).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</td>
+              <td><span class="pill pill-mute">${a.activity_type}</span></td>
+              <td class="font-mono text-ink-700">${a.duration_minutes} min</td>
+              <td class="font-mono"><span class="text-cadence">${a.intensity}</span><span class="text-ink-500">/10</span></td>
+              <td class="text-ink-700 text-xs">${a.description}</td>
+            </tr>`).join('')}</tbody>
+        </table>`;
+    }
+    async function saveActivity() {
+      const body = {
+        date: document.getElementById('ath-date').value,
+        activity_type: document.getElementById('ath-type').value,
+        duration_minutes: parseInt(document.getElementById('ath-duration').value || '0', 10),
+        intensity: parseInt(document.getElementById('ath-intensity').value || '0', 10),
+        description: document.getElementById('ath-description').value,
+      };
+      const { status, data } = await call('/api/athletic-activities', 'POST', body);
+      if (status === 201) {
+        toast('Activity saved');
+        document.getElementById('ath-description').value = '';
+        loadAthletic();
+      } else { toast(flatErr(data), 'bad'); }
+    }
 
-    const data = {
-        email: currentUser,
-        sleep_hours: parseFloat(document.getElementById("sim_sleep").value) || 0,
-        TotalSteps: parseFloat(document.getElementById("sim_steps").value) || 0,
-        TotalCalories: parseFloat(document.getElementById("sim_calories").value) || 300,
-        heart_rate: parseFloat(document.getElementById("sim_hr").value) || 70,
-        very_active_min: parseFloat(document.getElementById("sim_very_active").value) || 0,
-        fairly_active_min: parseFloat(document.getElementById("sim_fairly_active").value) || 0,
-        lightly_active_min: parseFloat(document.getElementById("sim_lightly_active").value) || 0
-    };
-
-    const res = await fetch("/predict", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(data)
-    });
-
-    const result = await res.json();
-
-    displayRecommendation(
-        result.prediction,
-        result.explanation,
-        result.readiness_score || "N/A",
-        "sim-"
-    );
-}
-
-</script>
-
+    // ===================== Boot =====================
+    (async () => {
+      await refreshAuthState();
+      const initial = window.location.hash.slice(1) || (authState.authenticated ? 'dashboard' : 'home');
+      renderRoute(initial);
+    })();
+  </script>
 </body>
 </html>
