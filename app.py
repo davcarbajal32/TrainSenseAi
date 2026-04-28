@@ -326,7 +326,9 @@ def create_athletic_activity():
 @login_required
 def get_week_recommendations():
     """Returns recommendations for the current week (Mon-Sun).
-    Empty list until session 3 wires up Claude generation."""
+    A day is marked 'completed' only when the user's check-in matches the
+    recommendation's intent: workout day where they did_workout=true, or
+    rest day where they didn't work out."""
     # Use naive UTC to match how Mongo stores datetimes (avoids tz comparison errors)
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     monday = today - timedelta(days=today.weekday())
@@ -337,12 +339,31 @@ def get_week_recommendations():
         "date": {"$gte": monday, "$lte": sunday},
     }).sort("date", 1))
 
-    # Annotate each rec with whether it was completed (a workout log exists for that date)
+    # Pull this week's workout logs
     workouts_this_week = list(db.workouts.find({
         "user_id": main.ObjectId(current_user.id),
         "date": {"$gte": monday, "$lte": sunday},
     }))
-    completed_dates = {w["date"].date() for w in workouts_this_week if w.get("did_workout")}
+    # Build a lookup: date -> log
+    logs_by_date = {w["date"].date(): w for w in workouts_this_week}
+
+    # A date counts as "completed" when:
+    # - There is a recommendation for that date AND
+    # - There is a workout log for that date AND
+    # - The log's did_workout matches the recommendation's intent
+    #   (workout planned + user worked out, OR rest planned + user rested)
+    completed_dates = set()
+    for r in recs:
+        d = r["date"].date()
+        log = logs_by_date.get(d)
+        if not log:
+            continue
+        rec_says_rest = bool(r.get("is_rest_day"))
+        user_worked  = bool(log.get("did_workout"))
+        if rec_says_rest and not user_worked:
+            completed_dates.add(d)
+        elif (not rec_says_rest) and user_worked:
+            completed_dates.add(d)
 
     out = []
     for r in recs:

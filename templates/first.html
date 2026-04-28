@@ -401,7 +401,32 @@
         </div>
         <div id="cal-empty" class="hidden mt-4 text-center py-8 border border-dashed border-ink-300 rounded-lg">
           <p class="text-sm text-ink-600 mb-3">No plan generated yet for this week.</p>
-          <p class="text-xs text-ink-500">Once your profile, semester, and week are set up, you'll be able to generate a 7-day plan here. <span class="text-ink-600">(Wired up in session 3.)</span></p>
+          <p class="text-xs text-ink-500">Once your profile, semester, and week are set up, click "Generate week's plan" above.</p>
+        </div>
+      </div>
+
+      <!-- 2b. Today + Tomorrow detail cards -->
+      <div class="grid md:grid-cols-2 gap-4 mb-6">
+        <!-- TODAY -->
+        <div id="today-card" class="card">
+          <div class="flex items-center justify-between mb-3">
+            <p class="text-xs text-cadence font-mono tracking-widest">// TODAY</p>
+            <span id="today-date" class="text-xs text-ink-600 font-mono"></span>
+          </div>
+          <div id="today-content">
+            <p class="text-sm text-ink-600 py-4">Loading…</p>
+          </div>
+        </div>
+
+        <!-- TOMORROW -->
+        <div id="tomorrow-card" class="card">
+          <div class="flex items-center justify-between mb-3">
+            <p class="text-xs text-ink-600 font-mono tracking-widest">// TOMORROW</p>
+            <span id="tomorrow-date" class="text-xs text-ink-600 font-mono"></span>
+          </div>
+          <div id="tomorrow-content">
+            <p class="text-sm text-ink-600 py-4">Loading…</p>
+          </div>
         </div>
       </div>
 
@@ -913,11 +938,14 @@
     }
 
     // ----- Inline daily check-in -----
+    let yesterdayLog = null;  // cached so edit can pre-fill
+
     async function loadCheckIn() {
       const yDate = yesterdayDate();
       const yISO = ymd(yDate);
       const { data } = await call('/api/workouts');
       const log = (data.workouts || []).find(w => w.date.slice(0,10) === yISO);
+      yesterdayLog = log || null;
 
       const subtitle = document.getElementById('checkin-subtitle');
       const pill = document.getElementById('checkin-status-pill');
@@ -936,25 +964,54 @@
         document.getElementById('ci-duration').textContent = log.duration_minutes ? log.duration_minutes + 'min' : '—';
         document.getElementById('ci-intensity').textContent = log.intensity ? log.intensity + '/10' : '—';
       } else {
+        // Reset to blank form for fresh entry
+        clearCheckInForm();
         form.classList.remove('hidden');
         completed.classList.add('hidden');
         pill.className = 'pill pill-warn'; pill.textContent = 'Pending';
       }
     }
+
+    function clearCheckInForm() {
+      document.getElementById('dash-sleep').value = '';
+      document.getElementById('dash-did-workout').checked = false;
+      document.getElementById('dash-workout-type').value = '';
+      document.getElementById('dash-duration').value = '';
+      document.getElementById('dash-intensity').value = '';
+      document.getElementById('dash-notes').value = '';
+      toggleDashWorkoutFields();
+    }
+
     function toggleDashWorkoutFields() {
       const did = document.getElementById('dash-did-workout').checked;
       document.getElementById('dash-workout-fields').classList.toggle('hidden', !did);
     }
+
     function editDashCheckIn() {
+      // Pre-fill the form with the existing log's values so user can adjust
+      if (yesterdayLog) {
+        document.getElementById('dash-sleep').value =
+          yesterdayLog.sleep_hours != null ? yesterdayLog.sleep_hours : '';
+        document.getElementById('dash-did-workout').checked = !!yesterdayLog.did_workout;
+        document.getElementById('dash-workout-type').value = yesterdayLog.workout_type || '';
+        document.getElementById('dash-duration').value = yesterdayLog.duration_minutes || '';
+        document.getElementById('dash-intensity').value = yesterdayLog.intensity || '';
+        document.getElementById('dash-notes').value = yesterdayLog.notes || '';
+        toggleDashWorkoutFields();
+      }
       document.getElementById('checkin-form').classList.remove('hidden');
       document.getElementById('checkin-completed').classList.add('hidden');
     }
+
     async function saveDashCheckIn() {
       const did = document.getElementById('dash-did-workout').checked;
       const sleepRaw = document.getElementById('dash-sleep').value;
+      const yISO = ymd(yesterdayDate());
+
       const body = {
+        date: yISO,                                      // explicit so backend doesn't guess
         did_workout: did,
-        sleep_hours: sleepRaw ? parseFloat(sleepRaw) : null,
+        sleep_hours: sleepRaw !== '' ? parseFloat(sleepRaw) : null,
         notes: document.getElementById('dash-notes').value || null,
       };
       if (did) {
@@ -965,10 +1022,6 @@
       const { status, data } = await call('/api/workouts', 'POST', body);
       if (status === 201) {
         toast('Check-in saved');
-        document.getElementById('dash-did-workout').checked = false;
-        toggleDashWorkoutFields();
-        document.getElementById('dash-sleep').value = '';
-        document.getElementById('dash-notes').value = '';
         await loadCheckIn();
         await loadWeekCalendar();
 
@@ -1049,6 +1102,82 @@
 
       // Show empty state hint if NO recommendations exist for the week
       empty.classList.toggle('hidden', recs.length > 0);
+
+      // Render Today + Tomorrow detail cards
+      renderTodayTomorrow(recs, completedDates);
+    }
+
+    function renderTodayTomorrow(recs, completedDates) {
+      const today = new Date(); today.setHours(0,0,0,0);
+      const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+      const todayISO = ymd(today);
+      const tomorrowISO = ymd(tomorrow);
+
+      const todayRec = recs.find(r => r.date.slice(0,10) === todayISO);
+      const tomorrowRec = recs.find(r => r.date.slice(0,10) === tomorrowISO);
+
+      document.getElementById('today-date').textContent =
+        today.toLocaleDateString('en-US',{weekday:'long', month:'short', day:'numeric'}).toUpperCase();
+      document.getElementById('tomorrow-date').textContent =
+        tomorrow.toLocaleDateString('en-US',{weekday:'long', month:'short', day:'numeric'}).toUpperCase();
+
+      const todayCompleted = completedDates && (
+        Array.from(completedDates).includes(todayISO) ||
+        (completedDates instanceof Set && completedDates.has(todayISO))
+      );
+
+      document.getElementById('today-content').innerHTML =
+        renderRecCard(todayRec, { completed: todayCompleted, isToday: true });
+      document.getElementById('tomorrow-content').innerHTML =
+        renderRecCard(tomorrowRec, { completed: false, isToday: false, showDisclaimer: true });
+    }
+
+    function renderRecCard(rec, opts) {
+      opts = opts || {};
+      if (!rec) {
+        return `<p class="text-sm text-ink-600 py-4">No recommendation yet. Generate this week's plan above.</p>`;
+      }
+
+      // Rest day
+      if (rec.is_rest_day) {
+        return `
+          <div class="space-y-3">
+            <div class="flex items-center gap-2">
+              <span class="pill pill-mute">Rest day</span>
+              ${opts.completed ? '<span class="pill pill-ok">Completed</span>' : ''}
+            </div>
+            <p class="text-sm text-ink-700 leading-relaxed">${escapeHtml(rec.reasoning || 'Recovery focused.')}</p>
+            ${opts.showDisclaimer ? "<p class='text-xs text-ink-500 italic mt-3'>Subject to change after tonight's check-in.</p>" : ''}
+          </div>`;
+      }
+
+      // Workout day
+      const time = rec.recommended_time ? `<span class="font-mono text-cadence">${rec.recommended_time}</span>` : '';
+      const intensity = rec.intensity ? `<span class="pill pill-cadence">${rec.intensity}</span>` : '';
+      const duration = rec.duration_minutes ? `<span class="font-mono text-ink-600">${rec.duration_minutes} min</span>` : '';
+
+      return `
+        <div class="space-y-3">
+          <div class="flex items-center gap-2 flex-wrap">
+            ${opts.completed ? '<span class="pill pill-ok">Completed ✓</span>' : ''}
+            <h3 class="font-display text-2xl font-semibold flex-1">${escapeHtml(rec.workout_type || 'Training session')}</h3>
+          </div>
+          <div class="flex items-center gap-3 flex-wrap">
+            ${time} ${intensity} ${duration}
+          </div>
+          <p class="text-sm text-ink-700 leading-relaxed">${escapeHtml(rec.reasoning || '')}</p>
+          ${opts.showDisclaimer ? "<p class='text-xs text-ink-500 italic mt-3'>Subject to change after tonight's check-in.</p>" : ''}
+        </div>`;
+    }
+
+    function escapeHtml(s) {
+      if (s == null) return '';
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
     async function generateWeek() {
