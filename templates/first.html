@@ -406,9 +406,12 @@
             <h2 class="font-display text-xl font-semibold">This week</h2>
             <p class="text-xs text-ink-600 mt-1" id="cal-range">—</p>
           </div>
-          <div class="flex gap-2">
-            <button onclick="regenerateToday()" class="btn btn-secondary text-xs">Regenerate today</button>
-            <button onclick="generateWeek()" class="btn btn-secondary text-xs" id="generate-week-btn">Generate week's plan</button>
+          <div class="flex flex-col items-end gap-2">
+            <div class="flex gap-2">
+              <button onclick="regenerateToday()" class="btn btn-secondary text-xs">Regenerate today</button>
+              <button onclick="generateWeek()" class="btn btn-secondary text-xs" id="generate-week-btn">Generate week's plan</button>
+            </div>
+            <p class="text-xs text-ink-500 italic">Regenerates today through Sunday based on your recent logs. Past days stay locked.</p>
           </div>
         </div>
         <div id="week-grid" class="grid grid-cols-7 gap-2">

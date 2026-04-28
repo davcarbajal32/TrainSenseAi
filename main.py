@@ -695,34 +695,150 @@ def store_daily_recommendation(user_id, target_date, parsed_response, raw_text=N
     return doc
 
 
-def generate_weekly_recommendations(user_id, week_start=None):
-    """Generate a full week (Mon-Sun) of recommendations via one Claude call.
-    Stores 7 individual rec docs in MongoDB. Returns the parsed week response.
+def compute_deviations_for_week(user_id, monday, today):
+    """For each past day this week (monday through yesterday), compare what was
+    planned to what was logged. Returns a human-readable summary string suitable
+    for inclusion in the prompt, or None if there's nothing notable.
 
-    Raises RuntimeError if Claude can't be reached or returns unparseable JSON.
+    Examples of deviations we capture:
+      - Plan said workout, user took rest
+      - Plan said rest, user worked out
+      - Plan said hypertrophy, user did cardio (followed_plan=false)
+      - User slept poorly relative to plan
+    """
+    uid = ObjectId(user_id) if not isinstance(user_id, ObjectId) else user_id
+
+    if today.tzinfo is not None:
+        today = today.replace(tzinfo=None)
+    if monday.tzinfo is not None:
+        monday = monday.replace(tzinfo=None)
+
+    # Pull all recommendations and logs for monday through yesterday
+    yesterday = today - timedelta(days=1)
+    if yesterday < monday:
+        return None  # it's still Monday, no past days yet
+
+    recs = list(db.recommendations.find({
+        "user_id": uid,
+        "date": {"$gte": monday, "$lte": yesterday},
+    }).sort("date", 1))
+    logs = list(db.workouts.find({
+        "user_id": uid,
+        "date": {"$gte": monday, "$lte": yesterday},
+    }).sort("date", 1))
+    logs_by_date = {w["date"].date(): w for w in logs}
+
+    if not recs and not logs:
+        return None
+
+    lines = []
+    for r in recs:
+        d = r["date"].date()
+        log = logs_by_date.get(d)
+        date_str = r["date"].strftime("%a %b %d")
+        plan_desc = "rest day" if r.get("is_rest_day") else (r.get("workout_type") or "workout (unspecified)")
+
+        if not log:
+            lines.append(f"{date_str}: planned {plan_desc} - no check-in logged (status unclear)")
+            continue
+
+        sleep = log.get("sleep_hours")
+        sleep_note = f", slept {sleep}hrs" if sleep is not None else ""
+
+        if r.get("is_rest_day"):
+            if log.get("did_workout"):
+                lines.append(
+                    f"{date_str}: planned REST, but user worked out "
+                    f"({log.get('workout_type', 'unspecified')}, "
+                    f"{log.get('duration_minutes', '?')}min, "
+                    f"intensity {log.get('intensity', '?')}/10){sleep_note}"
+                )
+            else:
+                lines.append(f"{date_str}: planned rest, user rested as planned{sleep_note}")
+        else:
+            if not log.get("did_workout"):
+                lines.append(f"{date_str}: planned {plan_desc}, user took rest instead{sleep_note}")
+            else:
+                followed = log.get("followed_plan")
+                actual = log.get("workout_type", "unspecified")
+                int_str = f"intensity {log.get('intensity', '?')}/10"
+                dur_str = f"{log.get('duration_minutes', '?')}min"
+                if followed is True:
+                    lines.append(
+                        f"{date_str}: planned {plan_desc}, user FOLLOWED plan "
+                        f"({actual}, {dur_str}, {int_str}){sleep_note}"
+                    )
+                elif followed is False:
+                    lines.append(
+                        f"{date_str}: planned {plan_desc}, but user did DIFFERENT workout "
+                        f"({actual}, {dur_str}, {int_str}){sleep_note}"
+                    )
+                else:
+                    lines.append(
+                        f"{date_str}: planned {plan_desc}, user worked out "
+                        f"({actual}, {dur_str}, {int_str}, plan-match unrecorded){sleep_note}"
+                    )
+
+    # Also capture days that have logs but no recommendation (rare - generated mid-week)
+    for d, log in logs_by_date.items():
+        if any(r["date"].date() == d for r in recs):
+            continue
+        date_str = log["date"].strftime("%a %b %d")
+        if log.get("did_workout"):
+            lines.append(
+                f"{date_str}: no plan on file, user worked out "
+                f"({log.get('workout_type', 'unspecified')}, "
+                f"{log.get('duration_minutes', '?')}min, "
+                f"intensity {log.get('intensity', '?')}/10)"
+            )
+
+    return "\n".join(lines) if lines else None
+
+
+def generate_weekly_recommendations(user_id, week_start=None):
+    """Generate this week's plan from TODAY through Sunday, leaving past days'
+    recommendations untouched (so the calendar still shows the original plan
+    vs what the user actually did, with green/yellow markers).
+
+    The prompt includes:
+      - Recent workout logs (always)
+      - An explicit 'deviations summary' showing planned vs actual for past days
+
+    Returns the parsed week response. Raises RuntimeError on Claude failure.
     """
     from claude import call_claude
     from weather import get_today_weather
 
     uid = ObjectId(user_id) if not isinstance(user_id, ObjectId) else user_id
 
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
     if week_start is None:
-        # Default to this week's Monday in naive UTC
-        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = today - timedelta(days=today.weekday())
     elif week_start.tzinfo is not None:
         week_start = week_start.replace(tzinfo=None)
 
-    # Pull context
-    pb = PromptBuilder()
-    user_doc, semester_doc, recent_w, recent_a = pb.gather_context(uid, target_date=week_start)
+    # Only regenerate from `regen_start` onward. If today is Monday, that's the
+    # whole week. If today is Wednesday, we leave Mon and Tue alone and
+    # regenerate Wed through Sun.
+    regen_start = max(today, week_start)
 
-    # Weather (best-effort)
+    # Compute the past-week deviation summary (if we have past days this week)
+    deviation_summary = compute_deviations_for_week(uid, week_start, today)
+
+    pb = PromptBuilder()
+    user_doc, semester_doc, recent_w, recent_a = pb.gather_context(uid, target_date=regen_start)
+
     profile = (user_doc or {}).get("profile") or {}
     loc = profile.get("location") or {}
     weather = get_today_weather(loc.get("lat"), loc.get("lon")) if loc.get("lat") else None
 
-    sys_p, user_p = pb.build_weekly(user_doc, semester_doc, recent_w, recent_a, weather, week_start)
+    sys_p, user_p = pb.build_weekly(
+        user_doc, semester_doc, recent_w, recent_a, weather,
+        regen_start,
+        full_week_start=week_start,
+        deviation_summary=deviation_summary,
+    )
     raw, parsed = call_claude(sys_p, user_p)
 
     if not parsed or not isinstance(parsed.get("days"), list):
@@ -732,17 +848,24 @@ def generate_weekly_recommendations(user_id, week_start=None):
         "weather": weather,
         "recent_workouts_count": len(recent_w),
         "week_load": _summarize_week_load(user_doc),
+        "regen_start": regen_start.date().isoformat(),
+        "deviation_summary": deviation_summary,
     }
 
-    # Store each day as its own recommendation document
+    # Store each day as its own recommendation - but ONLY for dates >= regen_start.
+    # Claude might return all 7 days; we ignore past days to preserve the original plan.
     stored = []
+    skipped_past = 0
     for day_entry in parsed["days"]:
         try:
             d = _parse_date(day_entry["date"])
         except Exception:
-            continue  # skip malformed entries
+            continue
+        if d < regen_start:
+            skipped_past += 1
+            continue
         doc = store_daily_recommendation(
-            uid, d, day_entry, raw_text=None,  # raw is shared across all 7 days
+            uid, d, day_entry, raw_text=None,
             context_used=context_used,
         )
         stored.append(doc)
@@ -750,6 +873,7 @@ def generate_weekly_recommendations(user_id, week_start=None):
     return {
         "week_summary": parsed.get("week_summary", ""),
         "days_stored": len(stored),
+        "past_days_preserved": skipped_past,
         "raw_text": raw,
     }
 
@@ -956,15 +1080,46 @@ class PromptBuilder:
         return self.SYSTEM_PROMPT, "\n\n".join(sections)
 
     def build_weekly(self, user_doc, semester_doc, recent_workouts,
-                     recent_activities, weather, week_start):
-        """Returns (system, user_prompt) for FULL WEEK generation."""
-        week_end = week_start + timedelta(days=6)
+                     recent_activities, weather, week_start,
+                     full_week_start=None, deviation_summary=None):
+        """Returns (system, user_prompt) for weekly generation.
+
+        Args:
+            week_start: First date to generate FOR (inclusive). If we're mid-week
+                and only regenerating from today onward, this is today.
+            full_week_start: The actual Monday of the calendar week, used for
+                showing all 7 days' commitments to Claude. If None, equals week_start.
+            deviation_summary: Optional human-readable summary of what was planned
+                vs actually done for past days this week. Empowers Claude to
+                course-correct the upcoming days.
+        """
+        if full_week_start is None:
+            full_week_start = week_start
+        week_end = full_week_start + timedelta(days=6)
+
         sections = self._common_user_sections(
             user_doc, semester_doc, recent_workouts, recent_activities,
             weather, week_start, week_end,
         )
-        sections.append(self._weekly_constraints_section(user_doc, semester_doc, week_start))
-        sections.append(self._weekly_task_section(week_start))
+
+        # Past-days deviation summary - only included when there's something to report.
+        # This is THE critical signal for partial regenerations: it tells Claude
+        # exactly where the user diverged from the original plan.
+        if deviation_summary:
+            sections.append(
+                "=== PAST DAYS THIS WEEK (planned vs actual) ===\n"
+                f"{deviation_summary}\n\n"
+                "These past days are LOCKED — do not generate recommendations for them. "
+                "Use them as the source of truth for what the athlete actually did, "
+                "and let that override the original plan when you decide what comes next. "
+                "If they did extra volume already, scale back. If they skipped a session, "
+                "consider whether to redistribute or accept the lost volume. If they did "
+                "a different workout type, balance the week's overall volume around what "
+                "actually happened, not what was planned."
+            )
+
+        sections.append(self._weekly_constraints_section(user_doc, semester_doc, full_week_start))
+        sections.append(self._weekly_task_section(week_start, full_week_start))
         return self.SYSTEM_PROMPT, "\n\n".join(sections)
 
     def build_daily_revision(self, user_doc, semester_doc, recent_workouts,
@@ -1176,20 +1331,42 @@ class PromptBuilder:
             )
         return "\n".join(lines)
 
-    def _weekly_task_section(self, week_start):
+    def _weekly_task_section(self, week_start, full_week_start=None):
+        """Build the task section. If week_start > full_week_start, we're regenerating
+        a partial week (mid-week reset based on logs)."""
+        if full_week_start is None:
+            full_week_start = week_start
+        is_partial = week_start.date() > full_week_start.date()
+        sunday = full_week_start + timedelta(days=6)
+        num_days = (sunday.date() - week_start.date()).days + 1
+
+        if is_partial:
+            scope_line = (
+                f"Plan {num_days} days of training, starting {week_start.strftime('%A %B %d')} "
+                f"through {sunday.strftime('%A %B %d')}. The earlier days of this week are LOCKED "
+                "(see 'PAST DAYS THIS WEEK' above) — do not output recommendations for them. "
+                "Use the past days as historical context to inform what comes next."
+            )
+        else:
+            scope_line = (
+                f"Plan this athlete's full training week starting {week_start.strftime('%A %B %d')} "
+                "(Monday through Sunday)."
+            )
+
         return (
             "=== YOUR TASK ===\n"
-            f"Plan this athlete's full training week starting {week_start.strftime('%A %B %d')} "
-            "(Monday through Sunday). Distribute volume, intensity, and rest days across the week to "
-            "maximize adaptation while respecting:\n"
+            f"{scope_line} Distribute volume, intensity, and rest days to maximize adaptation while respecting:\n"
             "- Their commitments each day (classes, work, athletic practices, games)\n"
             "- Recovery between hard sessions (48-72 hours for same muscle group)\n"
             "- Their sleep pattern and energy distribution\n"
             "- Their injuries\n"
-            "- The hard rules above\n\n"
+            "- The hard rules above\n"
+            f"- {'WHAT THE ATHLETE ACTUALLY DID this week, not the original plan' if is_partial else 'A balanced full-week structure'}\n\n"
             "Output ONLY this JSON, no markdown, no commentary:\n"
             "{\n"
-            '  "week_summary": "2-3 sentences explaining the structure of this week and why",\n'
+            '  "week_summary": "2-3 sentences explaining the structure ' +
+            ('of the remainder of the week and how you adjusted from what was actually done' if is_partial
+             else 'of this week and why') + '",\n'
             '  "days": [\n'
             "    {\n"
             '      "date": "YYYY-MM-DD",\n'
@@ -1200,7 +1377,7 @@ class PromptBuilder:
             '      "duration_minutes": integer or null,\n'
             '      "reasoning": "1-2 sentences specific to this day\'s role in the week"\n'
             "    }\n"
-            "    // 7 entries total, in date order Mon-Sun\n"
+            f"    // {num_days} entries total, dates from {week_start.strftime('%Y-%m-%d')} to {sunday.strftime('%Y-%m-%d')}\n"
             "  ]\n"
             "}"
         )
