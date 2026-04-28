@@ -153,6 +153,7 @@
     }
     .cal-day.today { border-color: #a78bfa; box-shadow: 0 0 0 1px #a78bfa inset; }
     .cal-day.completed { background: rgba(34, 197, 94, 0.06); border-color: rgba(34, 197, 94, 0.35); }
+    .cal-day.off-plan  { background: rgba(245, 158, 11, 0.06); border-color: rgba(245, 158, 11, 0.40); }
     .cal-day.rest      { background: rgba(167, 139, 250, 0.04); }
     .cal-day .cal-head {
       display: flex; align-items: center; justify-content: space-between;
@@ -164,6 +165,11 @@
       display: inline-flex; align-items: center; justify-content: center;
       width: 1rem; height: 1rem; border-radius: 999px;
       background: #22c55e; color: #06070a; font-size: 0.65rem; font-weight: 800;
+    }
+    .cal-dot {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 1rem; height: 1rem; border-radius: 999px;
+      background: #f59e0b; color: #06070a; font-size: 0.65rem; font-weight: 800;
     }
 
     .page { display: none; }
@@ -351,6 +357,15 @@
             </div>
           </div>
 
+          <div id="dash-followed-plan-wrap" class="hidden">
+            <label class="text-xs text-ink-600 block mb-2">Did you do the planned workout?</label>
+            <div class="flex gap-2">
+              <button type="button" id="fp-yes" onclick="setFollowedPlan(true)" class="btn btn-secondary text-xs">Yes, followed the plan</button>
+              <button type="button" id="fp-no" onclick="setFollowedPlan(false)" class="btn btn-secondary text-xs">No, did a different workout</button>
+            </div>
+            <p id="fp-hint" class="text-xs text-ink-500 mt-2 hidden"></p>
+          </div>
+
           <div>
             <label class="text-xs text-ink-600 block mb-1">Notes (optional)</label>
             <textarea id="dash-notes" placeholder="anything that mattered — felt great, lower back twinge, etc."></textarea>
@@ -399,6 +414,25 @@
         <div id="week-grid" class="grid grid-cols-7 gap-2">
           <!-- 7 cells injected here -->
         </div>
+
+        <!-- Legend -->
+        <div class="flex flex-wrap items-center gap-4 mt-4 text-xs text-ink-600">
+          <div class="flex items-center gap-1.5">
+            <span class="cal-check" style="width:0.85rem;height:0.85rem;font-size:0.5rem">✓</span>
+            <span>Followed plan</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="cal-dot" style="width:0.85rem;height:0.85rem;font-size:0.5rem">!</span>
+            <span>Worked out, off-plan</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span style="width:0.85rem;height:0.85rem;border-radius:999px;background:#252a37;display:inline-block"></span>
+            <span>Not logged or didn't follow plan</span>
+          </div>
+        </div>
+
+        <p class="text-xs text-ink-500 italic mt-3">Did an unplanned workout? Tap "Generate week's plan" to adjust the upcoming days.</p>
+
         <div id="cal-empty" class="hidden mt-4 text-center py-8 border border-dashed border-ink-300 rounded-lg">
           <p class="text-sm text-ink-600 mb-3">No plan generated yet for this week.</p>
           <p class="text-xs text-ink-500">Once your profile, semester, and week are set up, click "Generate week's plan" above.</p>
@@ -938,14 +972,23 @@
     }
 
     // ----- Inline daily check-in -----
-    let yesterdayLog = null;  // cached so edit can pre-fill
+    let yesterdayLog = null;     // cached for edit pre-fill
+    let yesterdayRec = null;     // yesterday's recommendation - drives whether we ask "did you follow plan?"
+    let dashFollowedPlan = null; // tri-state: null (unanswered), true, false
 
     async function loadCheckIn() {
       const yDate = yesterdayDate();
       const yISO = ymd(yDate);
-      const { data } = await call('/api/workouts');
-      const log = (data.workouts || []).find(w => w.date.slice(0,10) === yISO);
+
+      // Pull workouts AND recommendations in parallel
+      const [woRes, recRes] = await Promise.all([
+        call('/api/workouts'),
+        call('/api/recommendations/week'),
+      ]);
+      const log = (woRes.data.workouts || []).find(w => w.date.slice(0,10) === yISO);
+      const rec = (recRes.data.recommendations || []).find(r => r.date.slice(0,10) === yISO);
       yesterdayLog = log || null;
+      yesterdayRec = rec || null;
 
       const subtitle = document.getElementById('checkin-subtitle');
       const pill = document.getElementById('checkin-status-pill');
@@ -955,7 +998,6 @@
       subtitle.textContent = `For ${yDate.toLocaleDateString('en-US',{weekday:'long', month:'short', day:'numeric'})}`;
 
       if (log) {
-        // Already logged - show summary
         form.classList.add('hidden');
         completed.classList.remove('hidden');
         pill.className = 'pill pill-ok'; pill.textContent = 'Logged';
@@ -964,7 +1006,6 @@
         document.getElementById('ci-duration').textContent = log.duration_minutes ? log.duration_minutes + 'min' : '—';
         document.getElementById('ci-intensity').textContent = log.intensity ? log.intensity + '/10' : '—';
       } else {
-        // Reset to blank form for fresh entry
         clearCheckInForm();
         form.classList.remove('hidden');
         completed.classList.add('hidden');
@@ -979,16 +1020,51 @@
       document.getElementById('dash-duration').value = '';
       document.getElementById('dash-intensity').value = '';
       document.getElementById('dash-notes').value = '';
+      dashFollowedPlan = null;
+      updateFollowedPlanButtons();
       toggleDashWorkoutFields();
     }
 
     function toggleDashWorkoutFields() {
       const did = document.getElementById('dash-did-workout').checked;
       document.getElementById('dash-workout-fields').classList.toggle('hidden', !did);
+      updateFollowedPlanVisibility();
+    }
+
+    function updateFollowedPlanVisibility() {
+      // The "Did you follow the plan?" toggle is only relevant when:
+      //   1. User said they worked out yesterday (did_workout = true)
+      //   2. Yesterday had a recommendation that wasn't a rest day
+      const did = document.getElementById('dash-did-workout').checked;
+      const wrap = document.getElementById('dash-followed-plan-wrap');
+      const hint = document.getElementById('fp-hint');
+      const showToggle = did && yesterdayRec && !yesterdayRec.is_rest_day;
+      wrap.classList.toggle('hidden', !showToggle);
+
+      if (showToggle && yesterdayRec.workout_type) {
+        hint.textContent = `Yesterday's plan: ${yesterdayRec.workout_type}`;
+        hint.classList.remove('hidden');
+      } else {
+        hint.classList.add('hidden');
+      }
+    }
+
+    function setFollowedPlan(value) {
+      dashFollowedPlan = value;
+      updateFollowedPlanButtons();
+    }
+
+    function updateFollowedPlanButtons() {
+      const yes = document.getElementById('fp-yes');
+      const no  = document.getElementById('fp-no');
+      if (!yes || !no) return;
+      yes.classList.toggle('btn-primary',   dashFollowedPlan === true);
+      yes.classList.toggle('btn-secondary', dashFollowedPlan !== true);
+      no.classList.toggle('btn-primary',    dashFollowedPlan === false);
+      no.classList.toggle('btn-secondary',  dashFollowedPlan !== false);
     }
 
     function editDashCheckIn() {
-      // Pre-fill the form with the existing log's values so user can adjust
       if (yesterdayLog) {
         document.getElementById('dash-sleep').value =
           yesterdayLog.sleep_hours != null ? yesterdayLog.sleep_hours : '';
@@ -997,6 +1073,9 @@
         document.getElementById('dash-duration').value = yesterdayLog.duration_minutes || '';
         document.getElementById('dash-intensity').value = yesterdayLog.intensity || '';
         document.getElementById('dash-notes').value = yesterdayLog.notes || '';
+        dashFollowedPlan = (yesterdayLog.followed_plan === true || yesterdayLog.followed_plan === false)
+          ? yesterdayLog.followed_plan : null;
+        updateFollowedPlanButtons();
         toggleDashWorkoutFields();
       }
       document.getElementById('checkin-form').classList.remove('hidden');
@@ -1009,7 +1088,7 @@
       const yISO = ymd(yesterdayDate());
 
       const body = {
-        date: yISO,                                      // explicit so backend doesn't guess
+        date: yISO,
         did_workout: did,
         sleep_hours: sleepRaw !== '' ? parseFloat(sleepRaw) : null,
         notes: document.getElementById('dash-notes').value || null,
@@ -1018,14 +1097,24 @@
         body.workout_type = document.getElementById('dash-workout-type').value;
         body.duration_minutes = parseInt(document.getElementById('dash-duration').value || '0', 10);
         body.intensity = parseInt(document.getElementById('dash-intensity').value, 10);
+
+        // Only send followed_plan when the toggle was actually relevant
+        const fpShown = yesterdayRec && !yesterdayRec.is_rest_day;
+        if (fpShown) {
+          if (dashFollowedPlan === null) {
+            toast("Please answer: did you follow the planned workout?", 'bad');
+            return;
+          }
+          body.followed_plan = dashFollowedPlan;
+        }
       }
+
       const { status, data } = await call('/api/workouts', 'POST', body);
       if (status === 201) {
         toast('Check-in saved');
         await loadCheckIn();
         await loadWeekCalendar();
 
-        // If yesterday's data triggers a revision rule, offer to regenerate
         const lowSleep   = sleepRaw && parseFloat(sleepRaw) < 6;
         const highIntensity = did && body.intensity >= 9;
         if (lowSleep || highIntensity) {
@@ -1051,6 +1140,7 @@
       const { data } = await call('/api/recommendations/week');
       const recs = data.recommendations || [];
       const completedDates = new Set(data.completed_dates || []);
+      const offPlanDates   = new Set(data.off_plan_dates  || []);
       const today = ymd(new Date());
 
       // Build 7 cells
@@ -1060,11 +1150,13 @@
         const dayISO = ymd(day);
         const rec = recs.find(r => r.date.slice(0,10) === dayISO);
         const isToday = dayISO === today;
-        const isCompleted = completedDates.has(dayISO);
+        const isFollowed = completedDates.has(dayISO);
+        const isOffPlan  = offPlanDates.has(dayISO);
 
         const classes = ['cal-day'];
         if (isToday) classes.push('today');
-        if (isCompleted) classes.push('completed');
+        if (isFollowed) classes.push('completed');
+        else if (isOffPlan) classes.push('off-plan');
         if (rec && rec.is_rest_day) classes.push('rest');
 
         let body;
@@ -1088,13 +1180,17 @@
 
         const tooltip = rec && rec.reasoning ? ` title="${rec.reasoning.replace(/"/g, '&quot;')}"` : '';
 
+        let badge = '';
+        if (isFollowed) badge = '<span class="cal-check" title="Followed plan">✓</span>';
+        else if (isOffPlan) badge = '<span class="cal-dot" title="Worked out, off-plan">!</span>';
+
         cells.push(`
           <div class="${classes.join(' ')}"${tooltip}>
             <div class="cal-head">
               <span>${DAYS_DISPLAY[i]}</span>
               <span class="cal-num">${day.getDate()}</span>
             </div>
-            ${isCompleted ? '<span class="cal-check" title="Completed">✓</span>' : ''}
+            ${badge}
             ${body}
           </div>`);
       }

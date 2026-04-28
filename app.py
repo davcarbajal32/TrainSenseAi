@@ -279,6 +279,7 @@ def create_workout():
         duration_minutes=data.get("duration_minutes"),
         intensity=data.get("intensity"),
         notes=data.get("notes"),
+        followed_plan=data.get("followed_plan"),
     )
     return jsonify({"ok": True}), 201
 
@@ -326,10 +327,18 @@ def create_athletic_activity():
 @login_required
 def get_week_recommendations():
     """Returns recommendations for the current week (Mon-Sun).
-    A day is marked 'completed' only when the user's check-in matches the
-    recommendation's intent: workout day where they did_workout=true, or
-    rest day where they didn't work out."""
-    # Use naive UTC to match how Mongo stores datetimes (avoids tz comparison errors)
+
+    Each day returns a `state` field with one of three values:
+      - 'followed':  user logged a check-in matching the plan's intent
+                     (workout planned + did_workout=true + followed_plan=true,
+                      OR rest planned + did_workout=false)
+      - 'off_plan':  user logged a check-in that didn't match the plan
+                     (workout planned + did_workout=true + followed_plan=false,
+                      OR rest planned + did_workout=true)
+      - 'empty':     no log, or planned workout + user took rest
+                     (the user can't 'partially' complete a planned workout
+                      by skipping it - that's just empty)
+    """
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     monday = today - timedelta(days=today.weekday())
     sunday = monday + timedelta(days=6, hours=23, minutes=59, seconds=59)
@@ -339,31 +348,45 @@ def get_week_recommendations():
         "date": {"$gte": monday, "$lte": sunday},
     }).sort("date", 1))
 
-    # Pull this week's workout logs
     workouts_this_week = list(db.workouts.find({
         "user_id": main.ObjectId(current_user.id),
         "date": {"$gte": monday, "$lte": sunday},
     }))
-    # Build a lookup: date -> log
     logs_by_date = {w["date"].date(): w for w in workouts_this_week}
 
-    # A date counts as "completed" when:
-    # - There is a recommendation for that date AND
-    # - There is a workout log for that date AND
-    # - The log's did_workout matches the recommendation's intent
-    #   (workout planned + user worked out, OR rest planned + user rested)
-    completed_dates = set()
+    completed_dates = set()  # state = 'followed'
+    off_plan_dates  = set()  # state = 'off_plan'
+
     for r in recs:
         d = r["date"].date()
         log = logs_by_date.get(d)
         if not log:
-            continue
+            continue  # no log = empty
+
         rec_says_rest = bool(r.get("is_rest_day"))
-        user_worked  = bool(log.get("did_workout"))
-        if rec_says_rest and not user_worked:
-            completed_dates.add(d)
-        elif (not rec_says_rest) and user_worked:
-            completed_dates.add(d)
+        user_worked   = bool(log.get("did_workout"))
+        followed_plan = log.get("followed_plan")  # nullable bool
+
+        if rec_says_rest:
+            # Plan said rest. Did they rest?
+            if not user_worked:
+                completed_dates.add(d)         # rested as planned
+            else:
+                off_plan_dates.add(d)          # worked out on a rest day
+        else:
+            # Plan said work out.
+            if user_worked and followed_plan is True:
+                completed_dates.add(d)         # did the planned workout
+            elif user_worked and followed_plan is False:
+                off_plan_dates.add(d)          # did a different workout
+            elif user_worked and followed_plan is None:
+                # Old log without the new field. Treat as off_plan rather
+                # than green so we don't lie about completion.
+                off_plan_dates.add(d)
+            else:
+                # User took rest on a planned workout day. Empty - they didn't
+                # complete the plan, didn't work out either.
+                pass
 
     out = []
     for r in recs:
@@ -371,7 +394,15 @@ def get_week_recommendations():
         r["user_id"] = str(r["user_id"])
         date_obj = r["date"]
         r["date"] = date_obj.isoformat()
-        r["completed"] = date_obj.date() in completed_dates
+        d = date_obj.date()
+        if d in completed_dates:
+            r["state"] = "followed"
+        elif d in off_plan_dates:
+            r["state"] = "off_plan"
+        else:
+            r["state"] = "empty"
+        # Keep the old `completed` field for backward compat with old client code
+        r["completed"] = (r["state"] == "followed")
         if r.get("generated_at"):
             r["generated_at"] = r["generated_at"].isoformat()
         out.append(r)
@@ -380,6 +411,7 @@ def get_week_recommendations():
         "week_start": monday.isoformat(),
         "recommendations": out,
         "completed_dates": [d.isoformat() for d in completed_dates],
+        "off_plan_dates":  [d.isoformat() for d in off_plan_dates],
     }), 200
 
 

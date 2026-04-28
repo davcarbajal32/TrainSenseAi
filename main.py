@@ -270,6 +270,12 @@ def validate_workout(data):
         if not isinstance(i, int) or not (1 <= i <= 10):
             errors.append("intensity must be an integer 1-10")
 
+    # followed_plan is optional. When present, must be a bool. Only meaningful
+    # when did_workout is true AND a recommendation exists for that day.
+    fp = data.get("followed_plan")
+    if fp is not None and not isinstance(fp, bool):
+        errors.append("followed_plan must be true or false")
+
     notes = data.get("notes")
     if notes is not None and (not isinstance(notes, str) or len(notes) > 1000):
         errors.append("notes must be a string under 1000 characters")
@@ -561,7 +567,7 @@ def save_weekly_plan(user_id, week_start, work_blocks, study_hours):
 
 def log_workout(user_id, date_in, did_workout, sleep_hours=None,
                 workout_type=None, duration_minutes=None,
-                intensity=None, notes=None):
+                intensity=None, notes=None, followed_plan=None):
     """Inserts (or replaces) a workout log for the given date."""
     uid = ObjectId(user_id)
     date_dt = _parse_date(date_in) if isinstance(date_in, str) else date_in
@@ -574,6 +580,7 @@ def log_workout(user_id, date_in, did_workout, sleep_hours=None,
         "workout_type": (workout_type.strip() if workout_type else None) if did_workout else None,
         "duration_minutes": duration_minutes if did_workout else None,
         "intensity": intensity if did_workout else None,
+        "followed_plan": followed_plan if did_workout else None,
         "notes": (notes.strip() if notes else None) or None,
         "logged_at": datetime.now(timezone.utc),
     }
