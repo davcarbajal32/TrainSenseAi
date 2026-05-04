@@ -1,6 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <!-- Microsoft Clarity -->
+  <script type="text/javascript">
+    (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    })(window, document, "clarity", "script", "wlmscmqt05");
+  </script>
+
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cadence AI</title>
@@ -495,20 +504,6 @@
           <p class="font-display text-2xl mb-1" id="dash-week-summary">No plan yet</p>
           <p class="text-xs text-ink-500" id="dash-week-detail">Work + study hours per day</p>
         </a>
-      </div>
-
-      <!-- Prompt preview (debug) -->
-      <div class="card">
-        <div class="flex items-center justify-between mb-2">
-          <h2 class="font-display text-xl font-semibold">Prompt preview</h2>
-          <span class="pill pill-mute">Debug</span>
-        </div>
-        <p class="text-xs text-ink-600 mb-4">Exactly what would be sent to Claude. Use this to verify the brain has all your context before session 3 wires up the real API.</p>
-        <div class="flex gap-2 mb-3">
-          <button onclick="loadPreview('daily')" class="btn btn-secondary">Daily prompt</button>
-          <button onclick="loadPreview('weekly')" class="btn btn-secondary">Weekly prompt</button>
-        </div>
-        <pre id="preview-out" class="font-mono text-xs text-ink-700 bg-ink-0 border border-ink-300 rounded-lg p-4 overflow-auto max-h-[500px] whitespace-pre-wrap"></pre>
       </div>
     </section>
 
@@ -1359,14 +1354,6 @@
         wkSummary.textContent = 'No plan yet';
         wkDetail.textContent = 'Work + study hours per day';
       }
-    }
-
-    async function loadPreview(kind) {
-      const path = kind === 'weekly' ? '/api/prompt-preview/weekly' : '/api/prompt-preview';
-      const { status, data } = await call(path);
-      const el = document.getElementById('preview-out');
-      if (status !== 200) { el.textContent = 'Error: ' + (data.error || status); return; }
-      el.textContent = '── SYSTEM ──\n' + data.system_prompt + '\n\n── USER ──\n' + data.user_prompt;
     }
 
     // ===================== Profile =====================
