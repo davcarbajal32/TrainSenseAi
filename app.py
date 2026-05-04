@@ -65,7 +65,7 @@ def unauthorized():
 
 @app.get("/")
 def home():
-    return render_template("index.html")
+    return render_template("first.html")
 
 
 # =====================================================================
