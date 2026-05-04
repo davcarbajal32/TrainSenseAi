@@ -1,6 +1,14 @@
+"""
+Claude API client.
 
+Wraps the Anthropic API in a clean function so the rest of the app
+doesn't need to know about retries, JSON parsing, or error shapes.
+
+Reads ANTHROPIC_API_KEY from environment. Never hardcoded.
+"""
 
 import os
+import re
 import json
 import logging
 from typing import Tuple, Optional
@@ -11,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Sonnet 4.6 - most recent Sonnet, smart enough for coaching prompts, cheaper than Opus
 MODEL = "claude-sonnet-4-6"
-MAX_TOKENS = 2048
+MAX_TOKENS = 4096  # weekly plan with 7 reasoning blocks can run long
 
 
 _client = None
@@ -73,21 +81,16 @@ def call_claude(system_prompt: str, user_prompt: str) -> Tuple[str, dict]:
     raw_text = raw_text.strip()
 
     # The prompt asks for strict JSON. Sometimes models still wrap it in
-    # markdown fences anyway. Strip those if present before parsing.
-    cleaned = raw_text
-    if cleaned.startswith("```"):
-        # Remove first fence line
-        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-        # Remove closing fence
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
+    # markdown fences. Strip those robustly: handles ```json, ``` , and
+    # partially-formed fences. Also handles cases where Claude prepends
+    # text before the JSON block.
+    cleaned = _extract_json(raw_text)
 
     parsed: Optional[dict] = None
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
-        logger.warning("Claude returned non-JSON response: %s", raw_text[:300])
+        logger.warning("Claude returned non-JSON response: %s", raw_text[:500])
 
     # Token usage for cost monitoring
     if hasattr(msg, "usage"):
@@ -97,3 +100,36 @@ def call_claude(system_prompt: str, user_prompt: str) -> Tuple[str, dict]:
         )
 
     return raw_text, parsed
+
+
+def _extract_json(text: str) -> str:
+    """Pull a JSON object out of model output, handling all the ways Claude
+    might wrap it: ```json fences, plain ``` fences, leading prose before
+    the JSON, etc. Returns the best candidate string for json.loads().
+
+    Strategy:
+      1. If wrapped in fences (``` or ```json), extract the fenced content.
+      2. Otherwise, find the first '{' and matching final '}' and return that.
+      3. Fallback: return the original text and let the caller see the parse fail.
+    """
+    if not text:
+        return text
+    s = text.strip()
+
+    # Case 1: fenced. Match ```json ... ``` or ``` ... ```. Tolerates
+    # missing closing fence (truncated responses).
+    fence_match = re.match(
+        r"^```(?:json|JSON)?\s*\n(.*?)(?:\n```|\Z)",
+        s, flags=re.DOTALL,
+    )
+    if fence_match:
+        return fence_match.group(1).strip()
+
+    # Case 2: prose then JSON. Find first '{' and slice from there to the
+    # last '}' (inclusive). Loose but works for our prompt format.
+    first_brace = s.find("{")
+    last_brace  = s.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        return s[first_brace:last_brace + 1].strip()
+
+    return s
