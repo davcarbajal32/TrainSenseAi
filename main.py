@@ -1306,12 +1306,12 @@ class PromptBuilder:
             "{\n"
             '  "is_rest_day": boolean,\n'
             '  "recommended_time": "HH:MM" or null,\n'
-            '  "workout_type": "specific session name (e.g., \'pull-focused upper, hypertrophy emphasis\')" or null,\n'
+            '  "workout_type": "Concise label only - 8 WORDS MAXIMUM. e.g. \\"Pull-focused upper, hypertrophy\\" or \\"Zone 2 Cardio\\". DO NOT list exercises/sets/reps here." or null,\n'
             '  "intensity": "low" | "medium" | "high" or null,\n'
             '  "duration_minutes": integer or null,\n'
             '  "reasoning": "3-4 sentences. Reference the SPECIFIC principles you applied (which research, '
             'which constraint, which recovery state). Why THIS session for THIS athlete on THIS day, not '
-            'generic coaching."\n'
+            'generic coaching. Specific exercise/set/rep prescriptions may go here if relevant."\n'
             "}"
         )
 
@@ -1372,10 +1372,10 @@ class PromptBuilder:
             '      "date": "YYYY-MM-DD",\n'
             '      "is_rest_day": boolean,\n'
             '      "recommended_time": "HH:MM" or null,\n'
-            '      "workout_type": "..." or null,\n'
+            '      "workout_type": "Concise label only - 8 WORDS MAXIMUM. e.g. \\"Hypertrophy - Push (Chest/Shoulders/Triceps)\\" or \\"Zone 2 Cardio\\". DO NOT include exercise lists, sets, or reps here." or null,\n'
             '      "intensity": "low" | "medium" | "high" or null,\n'
             '      "duration_minutes": integer or null,\n'
-            '      "reasoning": "1-2 sentences specific to this day\'s role in the week"\n'
+            '      "reasoning": "1-2 sentences specific to this day\'s role in the week. Specific exercises/sets/reps may go here if relevant."\n'
             "    }\n"
             f"    // {num_days} entries total, dates from {week_start.strftime('%Y-%m-%d')} to {sunday.strftime('%Y-%m-%d')}\n"
             "  ]\n"
@@ -1408,7 +1408,7 @@ class PromptBuilder:
             "{\n"
             '  "is_rest_day": boolean,\n'
             '  "recommended_time": "HH:MM" or null,\n'
-            '  "workout_type": "..." or null,\n'
+            '  "workout_type": "Concise label - 8 WORDS MAXIMUM. No exercise lists." or null,\n'
             '  "intensity": "low" | "medium" | "high" or null,\n'
             '  "duration_minutes": integer or null,\n'
             '  "reasoning": "3-4 sentences. State what changed, which rule applied, and how you adjusted."\n'

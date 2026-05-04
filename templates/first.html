@@ -1215,7 +1215,7 @@
           } else {
             body = `
               <div class="mt-auto">
-                <p class="font-display text-sm leading-tight mb-1">${rec.workout_type || '—'}</p>
+                <p class="font-display text-sm leading-tight mb-1">${truncate(rec.workout_type, 50)}</p>
                 <div class="flex items-center gap-1.5 text-xs">
                   ${rec.recommended_time ? `<span class="font-mono text-cadence">${rec.recommended_time}</span>` : ''}
                   ${rec.intensity ? `<span class="pill pill-cadence" style="font-size:0.6rem;padding:0.05rem 0.4rem">${rec.intensity}</span>` : ''}
@@ -1249,20 +1249,27 @@
       empty.classList.toggle('hidden', recs.length > 0);
 
       // Render Today + Tomorrow detail cards.
-      // These are ALWAYS anchored to the actual current date, so when the
-      // calendar is showing "Next week" we still need to pull THIS week's
-      // recommendations for these cards.
-      if (weekOffset === 0) {
-        renderTodayTomorrow(recs, completedDates);
-      } else {
-        // Need this week's data for today/tomorrow cards. Compute this Monday explicitly.
-        const thisMonday = startOfWeek();
-        const { data: thisWeek } = await call(`/api/recommendations/week?week_start=${ymd(thisMonday)}`);
-        renderTodayTomorrow(
-          thisWeek.recommendations || [],
-          new Set(thisWeek.completed_dates || []),
-        );
-      }
+      // These are ALWAYS anchored to the actual current date. When today is
+      // Sunday, tomorrow is Monday of NEXT week, so we need both weeks' data
+      // merged. Fetching both is cheap and handles the boundary cleanly.
+      const thisMonday = startOfWeek();
+      const nextMonday = new Date(thisMonday); nextMonday.setDate(thisMonday.getDate() + 7);
+
+      const [thisRes, nextRes] = await Promise.all([
+        call(`/api/recommendations/week?week_start=${ymd(thisMonday)}`),
+        call(`/api/recommendations/week?week_start=${ymd(nextMonday)}`),
+      ]);
+
+      const mergedRecs = [
+        ...(thisRes.data.recommendations || []),
+        ...(nextRes.data.recommendations || []),
+      ];
+      const mergedCompleted = new Set([
+        ...(thisRes.data.completed_dates || []),
+        ...(nextRes.data.completed_dates || []),
+      ]);
+
+      renderTodayTomorrow(mergedRecs, mergedCompleted);
     }
 
     function renderTodayTomorrow(recs, completedDates) {
@@ -1336,6 +1343,13 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+    }
+
+    function truncate(s, maxLen) {
+      if (s == null || s === '') return '—';
+      const str = String(s);
+      if (str.length <= maxLen) return str;
+      return str.slice(0, maxLen - 1).trimEnd() + '…';
     }
 
     async function generateWeek() {
