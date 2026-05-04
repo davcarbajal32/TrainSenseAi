@@ -1175,7 +1175,7 @@
       const empty = document.getElementById('cal-empty');
       const range = document.getElementById('cal-range');
 
-      // Compute the displayed week's Monday
+      // Compute the displayed week's Monday (in user's local time)
       const monday = startOfWeek();
       monday.setDate(monday.getDate() + (weekOffset * 7));
       const sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
@@ -1183,7 +1183,10 @@
         monday.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' – ' +
         sunday.toLocaleDateString('en-US',{month:'short',day:'numeric'});
 
-      const { data } = await call(`/api/recommendations/week?week_offset=${weekOffset}`);
+      // Send the explicit Monday date so the server doesn't have to compute
+      // it (avoids drift when server UTC date != user's local date).
+      const mondayISO = ymd(monday);
+      const { data } = await call(`/api/recommendations/week?week_start=${mondayISO}`);
       const recs = data.recommendations || [];
       const completedDates = new Set(data.completed_dates || []);
       const offPlanDates   = new Set(data.off_plan_dates  || []);
@@ -1252,7 +1255,9 @@
       if (weekOffset === 0) {
         renderTodayTomorrow(recs, completedDates);
       } else {
-        const { data: thisWeek } = await call('/api/recommendations/week?week_offset=0');
+        // Need this week's data for today/tomorrow cards. Compute this Monday explicitly.
+        const thisMonday = startOfWeek();
+        const { data: thisWeek } = await call(`/api/recommendations/week?week_start=${ymd(thisMonday)}`);
         renderTodayTomorrow(
           thisWeek.recommendations || [],
           new Set(thisWeek.completed_dates || []),
@@ -1339,7 +1344,13 @@
       btn.disabled = true;
       btn.textContent = 'Generating...';
       try {
-        const { status, data } = await call('/api/recommendations/week', 'POST', { week_offset: weekOffset });
+        // Compute the target week's Monday in local time and send explicitly,
+        // so the server doesn't have to guess based on its own clock.
+        const monday = startOfWeek();
+        monday.setDate(monday.getDate() + (weekOffset * 7));
+        const mondayISO = ymd(monday);
+
+        const { status, data } = await call('/api/recommendations/week', 'POST', { week_start: mondayISO });
         if (status === 201) {
           const label = weekOffset === 0 ? 'Week plan generated' : 'Next week plan generated';
           toast(`${label} (${data.days_stored} days)`);

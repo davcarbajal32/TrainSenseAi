@@ -342,15 +342,27 @@ def get_week_recommendations():
                      (the user can't 'partially' complete a planned workout
                       by skipping it - that's just empty)
     """
-    try:
-        week_offset = int(request.args.get("week_offset", "0"))
-    except ValueError:
-        week_offset = 0
-    week_offset = max(0, min(week_offset, 4))  # clamp 0-4 weeks ahead
+    # Prefer explicit week_start from the client (avoids UTC-vs-local-time drift
+    # where the server's "today" is a different calendar day than the user's).
+    # Falls back to week_offset relative to server-side today.
+    week_start_str = request.args.get("week_start")
+    monday = None
+    if week_start_str:
+        try:
+            monday = datetime.fromisoformat(week_start_str.split("T")[0])
+        except ValueError:
+            monday = None
 
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    this_monday = today - timedelta(days=today.weekday())
-    monday = this_monday + timedelta(weeks=week_offset)
+    if monday is None:
+        try:
+            week_offset = int(request.args.get("week_offset", "0"))
+        except ValueError:
+            week_offset = 0
+        week_offset = max(0, min(week_offset, 4))
+        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        this_monday = today - timedelta(days=today.weekday())
+        monday = this_monday + timedelta(weeks=week_offset)
+
     sunday = monday + timedelta(days=6, hours=23, minutes=59, seconds=59)
 
     recs = list(db.recommendations.find({
@@ -418,7 +430,6 @@ def get_week_recommendations():
         out.append(r)
 
     return jsonify({
-        "week_offset": week_offset,
         "week_start": monday.isoformat(),
         "recommendations": out,
         "completed_dates": [d.isoformat() for d in completed_dates],
@@ -432,22 +443,33 @@ def generate_week_api():
     """Trigger Claude generation for a week's plan. Stores up to 7 daily docs.
 
     JSON body (optional):
-      week_offset: int (default 0) - 0 = this week, 1 = next week, etc.
+      week_start: 'YYYY-MM-DD' string of the Monday to plan from. Preferred -
+        avoids server vs client timezone drift.
+      week_offset: int fallback (default 0) - 0 = this week, 1 = next week, etc.
     """
     if not current_user.profile_completed:
         return jsonify({"error": "Complete your profile before generating a plan"}), 400
 
     body = request.get_json(silent=True) or {}
-    try:
-        week_offset = int(body.get("week_offset", 0))
-    except (TypeError, ValueError):
-        week_offset = 0
-    week_offset = max(0, min(week_offset, 4))
 
-    # Compute the requested week's Monday in naive UTC
-    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    this_monday = today - timedelta(days=today.weekday())
-    week_start = this_monday + timedelta(weeks=week_offset)
+    # Prefer explicit week_start (avoids timezone drift)
+    week_start = None
+    week_start_str = body.get("week_start")
+    if week_start_str:
+        try:
+            week_start = datetime.fromisoformat(week_start_str.split("T")[0])
+        except (ValueError, AttributeError):
+            week_start = None
+
+    if week_start is None:
+        try:
+            week_offset = int(body.get("week_offset", 0))
+        except (TypeError, ValueError):
+            week_offset = 0
+        week_offset = max(0, min(week_offset, 4))
+        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        this_monday = today - timedelta(days=today.weekday())
+        week_start = this_monday + timedelta(weeks=week_offset)
 
     try:
         result = generate_weekly_recommendations(current_user.id, week_start=week_start)
@@ -456,7 +478,7 @@ def generate_week_api():
 
     return jsonify({
         "ok": True,
-        "week_offset": week_offset,
+        "week_start": week_start.isoformat(),
         "week_summary": result["week_summary"],
         "days_stored": result["days_stored"],
     }), 201
