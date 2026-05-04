@@ -65,7 +65,7 @@ def unauthorized():
 
 @app.get("/")
 def home():
-    return render_template("first.html")
+    return render_template("index.html")
 
 
 # =====================================================================
@@ -326,7 +326,10 @@ def create_athletic_activity():
 @app.get("/api/recommendations/week")
 @login_required
 def get_week_recommendations():
-    """Returns recommendations for the current week (Mon-Sun).
+    """Returns recommendations for a given week.
+
+    Query params:
+      week_offset: int (default 0) - 0 means this week, 1 means next week, etc.
 
     Each day returns a `state` field with one of three values:
       - 'followed':  user logged a check-in matching the plan's intent
@@ -339,8 +342,15 @@ def get_week_recommendations():
                      (the user can't 'partially' complete a planned workout
                       by skipping it - that's just empty)
     """
+    try:
+        week_offset = int(request.args.get("week_offset", "0"))
+    except ValueError:
+        week_offset = 0
+    week_offset = max(0, min(week_offset, 4))  # clamp 0-4 weeks ahead
+
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    monday = today - timedelta(days=today.weekday())
+    this_monday = today - timedelta(days=today.weekday())
+    monday = this_monday + timedelta(weeks=week_offset)
     sunday = monday + timedelta(days=6, hours=23, minutes=59, seconds=59)
 
     recs = list(db.recommendations.find({
@@ -408,6 +418,7 @@ def get_week_recommendations():
         out.append(r)
 
     return jsonify({
+        "week_offset": week_offset,
         "week_start": monday.isoformat(),
         "recommendations": out,
         "completed_dates": [d.isoformat() for d in completed_dates],
@@ -418,17 +429,34 @@ def get_week_recommendations():
 @app.post("/api/recommendations/week")
 @login_required
 def generate_week_api():
-    """Trigger Claude generation for the full week. Stores 7 daily docs."""
+    """Trigger Claude generation for a week's plan. Stores up to 7 daily docs.
+
+    JSON body (optional):
+      week_offset: int (default 0) - 0 = this week, 1 = next week, etc.
+    """
     if not current_user.profile_completed:
         return jsonify({"error": "Complete your profile before generating a plan"}), 400
 
+    body = request.get_json(silent=True) or {}
     try:
-        result = generate_weekly_recommendations(current_user.id)
+        week_offset = int(body.get("week_offset", 0))
+    except (TypeError, ValueError):
+        week_offset = 0
+    week_offset = max(0, min(week_offset, 4))
+
+    # Compute the requested week's Monday in naive UTC
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    this_monday = today - timedelta(days=today.weekday())
+    week_start = this_monday + timedelta(weeks=week_offset)
+
+    try:
+        result = generate_weekly_recommendations(current_user.id, week_start=week_start)
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 502
 
     return jsonify({
         "ok": True,
+        "week_offset": week_offset,
         "week_summary": result["week_summary"],
         "days_stored": result["days_stored"],
     }), 201

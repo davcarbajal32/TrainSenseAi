@@ -410,17 +410,23 @@
 
       <!-- 2. Weekly calendar -->
       <div class="card mb-6">
-        <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <h2 class="font-display text-xl font-semibold">This week</h2>
-            <p class="text-xs text-ink-600 mt-1" id="cal-range">—</p>
+            <div class="flex items-center gap-3 mb-1">
+              <h2 id="cal-title" class="font-display text-xl font-semibold">This week</h2>
+              <div class="flex items-center bg-ink-200 rounded-md p-0.5 text-xs">
+                <button id="toggle-this-week" onclick="setWeekOffset(0)" class="px-3 py-1 rounded font-medium transition-colors">This week</button>
+                <button id="toggle-next-week" onclick="setWeekOffset(1)" class="px-3 py-1 rounded font-medium transition-colors">Next week</button>
+              </div>
+            </div>
+            <p class="text-xs text-ink-600" id="cal-range">—</p>
           </div>
           <div class="flex flex-col items-end gap-2">
             <div class="flex gap-2">
-              <button onclick="regenerateToday()" class="btn btn-secondary text-xs">Regenerate today</button>
+              <button id="regenerate-today-btn" onclick="regenerateToday()" class="btn btn-secondary text-xs">Regenerate today</button>
               <button onclick="generateWeek()" class="btn btn-secondary text-xs" id="generate-week-btn">Generate week's plan</button>
             </div>
-            <p class="text-xs text-ink-500 italic">Regenerates today through Sunday based on your recent logs. Past days stay locked.</p>
+            <p id="generate-week-hint" class="text-xs text-ink-500 italic">Regenerates today through Sunday based on your recent logs. Past days stay locked.</p>
           </div>
         </div>
         <div id="week-grid" class="grid grid-cols-7 gap-2">
@@ -1124,18 +1130,60 @@
     }
 
     // ----- Weekly calendar -----
+    // Which week is the dashboard showing? 0 = this week, 1 = next week.
+    // Defaults to next week on Sat/Sun (weekend planning mode), this week otherwise.
+    let weekOffset = (function() {
+      const dow = new Date().getDay(); // 0 = Sun, 6 = Sat
+      return (dow === 0 || dow === 6) ? 1 : 0;
+    })();
+
+    function setWeekOffset(offset) {
+      weekOffset = offset;
+      updateWeekToggleUI();
+      loadWeekCalendar();
+    }
+
+    function updateWeekToggleUI() {
+      const btnThis = document.getElementById('toggle-this-week');
+      const btnNext = document.getElementById('toggle-next-week');
+      if (!btnThis || !btnNext) return;
+      const active = 'bg-cadence text-ink-0';
+      const inactive = 'text-ink-600 hover:text-ink-800';
+      btnThis.className = `px-3 py-1 rounded font-medium transition-colors ${weekOffset === 0 ? active : inactive}`;
+      btnNext.className = `px-3 py-1 rounded font-medium transition-colors ${weekOffset === 1 ? active : inactive}`;
+
+      // Update title and hint text based on which week we're showing
+      document.getElementById('cal-title').textContent = weekOffset === 0 ? 'This week' : 'Next week';
+
+      const hint = document.getElementById('generate-week-hint');
+      if (weekOffset === 0) {
+        hint.textContent = "Regenerates today through Sunday based on your recent logs. Past days stay locked.";
+      } else {
+        hint.textContent = "Generates a fresh plan for next week (Mon–Sun).";
+      }
+
+      // Update generate-week button label
+      const genBtn = document.getElementById('generate-week-btn');
+      if (genBtn && !genBtn.disabled) {
+        genBtn.textContent = weekOffset === 0 ? "Generate week's plan" : "Generate next week";
+      }
+    }
+
     async function loadWeekCalendar() {
+      updateWeekToggleUI();
       const grid = document.getElementById('week-grid');
       const empty = document.getElementById('cal-empty');
       const range = document.getElementById('cal-range');
 
+      // Compute the displayed week's Monday
       const monday = startOfWeek();
+      monday.setDate(monday.getDate() + (weekOffset * 7));
       const sunday = new Date(monday); sunday.setDate(monday.getDate()+6);
       range.textContent =
         monday.toLocaleDateString('en-US',{month:'short',day:'numeric'}) + ' – ' +
         sunday.toLocaleDateString('en-US',{month:'short',day:'numeric'});
 
-      const { data } = await call('/api/recommendations/week');
+      const { data } = await call(`/api/recommendations/week?week_offset=${weekOffset}`);
       const recs = data.recommendations || [];
       const completedDates = new Set(data.completed_dates || []);
       const offPlanDates   = new Set(data.off_plan_dates  || []);
@@ -1197,8 +1245,19 @@
       // Show empty state hint if NO recommendations exist for the week
       empty.classList.toggle('hidden', recs.length > 0);
 
-      // Render Today + Tomorrow detail cards
-      renderTodayTomorrow(recs, completedDates);
+      // Render Today + Tomorrow detail cards.
+      // These are ALWAYS anchored to the actual current date, so when the
+      // calendar is showing "Next week" we still need to pull THIS week's
+      // recommendations for these cards.
+      if (weekOffset === 0) {
+        renderTodayTomorrow(recs, completedDates);
+      } else {
+        const { data: thisWeek } = await call('/api/recommendations/week?week_offset=0');
+        renderTodayTomorrow(
+          thisWeek.recommendations || [],
+          new Set(thisWeek.completed_dates || []),
+        );
+      }
     }
 
     function renderTodayTomorrow(recs, completedDates) {
@@ -1276,19 +1335,21 @@
 
     async function generateWeek() {
       const btn = document.getElementById('generate-week-btn');
+      const originalLabel = weekOffset === 0 ? "Generate week's plan" : "Generate next week";
       btn.disabled = true;
       btn.textContent = 'Generating...';
       try {
-        const { status, data } = await call('/api/recommendations/week', 'POST');
+        const { status, data } = await call('/api/recommendations/week', 'POST', { week_offset: weekOffset });
         if (status === 201) {
-          toast(`Week plan generated (${data.days_stored} days)`);
+          const label = weekOffset === 0 ? 'Week plan generated' : 'Next week plan generated';
+          toast(`${label} (${data.days_stored} days)`);
           await loadWeekCalendar();
         } else {
           toast(data.error || 'Failed to generate', 'bad');
         }
       } finally {
         btn.disabled = false;
-        btn.textContent = "Generate week's plan";
+        btn.textContent = originalLabel;
       }
     }
 
