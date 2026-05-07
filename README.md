@@ -13,7 +13,7 @@ Live at: https://cadenceai.mooo.com
 ├── claude.py           # Anthropic API client
 ├── weather.py          # Open-Meteo weather and geocoding
 ├── templates/
-│   └── index.html      # Single-page frontend (Tailwind CSS)
+│   └── first.html      # Single-page frontend (Tailwind CSS)
 ├── requirements.txt
 └── .env                # Secret keys (not committed)
 
